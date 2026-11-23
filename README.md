@@ -26,16 +26,17 @@ Si `js/config.js` est vide, tout reste dans le navigateur avec un portefeuille d
 
 Ces quatre valeurs restent dans Supabase : elles ne sont jamais dans l'app ni sur GitHub.
 
-### 2. Supabase
+### 2. Supabase (déjà fait le 23 novembre 2026, dans le projet de Cap'taine)
 
-1. Crée un projet sur supabase.com (région Europe), ou réutilise celui de Cap'taine : les tables ont d'autres noms. Si tu le réutilises, les comptes autorisés sont différents (`owners` ici, `admins` là-bas).
-2. *SQL Editor > New query* : colle le contenu de `supabase/schema.sql`, puis **Run**.
-3. *Authentication > Users > Add user > Create new user* : ton e-mail et un mot de passe, coche **Auto Confirm User**. Puis dans le *SQL Editor* : `insert into public.owners (email) values ('ton@email.be');` (en minuscules).
-4. *Edge Functions > Deploy a new function > Via Editor*, nom **`bricklink`**. Crée deux fichiers et colles-y le contenu de `supabase/functions/bricklink/index.ts` et de `bricklink.js`. Dans les réglages de la fonction, **désactive « Verify JWT »** : la fonction contrôle elle-même qui l'appelle.
-   Avec la CLI : `supabase functions deploy bricklink --no-verify-jwt --project-ref <PROJET>`.
-5. *Edge Functions > Secrets* : ajoute `BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`, `BRICKLINK_TOKEN_SECRET` et `CRON_SECRET`. Pour `CRON_SECRET`, choisis une longue phrase au hasard. Facultatif : `BRICKLINK_REGION` (par défaut `europe`).
-6. Ouvre `supabase/cron.sql`, remplace `<PROJET>` et `<SECRET>`, puis lance-le dans le *SQL Editor*. Le relevé tourne alors chaque lundi.
-7. *Project Settings > API* : copie l'URL du projet et la clé **anon / publishable** dans `js/config.js`.
+Brickfolio partage le projet Supabase de Cap'taine (`zzhzdiuoonhvxndmziju`) : le plan gratuit est limité à 2 projets. Aucun nom de table ou de fonction ne se croise.
+
+1. *SQL Editor* : `supabase/schema.sql` (tables, sécurité), puis `insert into public.owners (email) values ('ton@email.be');`. Le compte de connexion est le même que pour Cap'taine.
+2. Fonction **`bricklink`** : *Edge Functions > bricklink > Code*, coller `supabase/bricklink-editeur.ts` (généré par `node tests/build-function.mjs` à partir de `supabase/functions/bricklink/`), puis *Deploy updates*. Dans *Settings*, « Verify JWT with legacy secret » reste **désactivé** : la fonction contrôle elle-même qui l'appelle.
+   Avec la CLI : `supabase functions deploy bricklink --no-verify-jwt --project-ref zzhzdiuoonhvxndmziju`.
+3. *SQL Editor* : `supabase/cron.sql` (en remplaçant `<PROJET>`). Il crée le relevé du lundi et génère dans le coffre chiffré de Supabase (Vault) le secret qui l'autorise : personne n'a à le connaître.
+4. `js/config.js` : URL du projet et clé publique (*Project Settings > API*).
+
+**Reste à faire quand BrickLink est en ligne** : *Edge Functions > Secrets*, ajouter `BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`, `BRICKLINK_TOKEN_SECRET` (facultatif : `BRICKLINK_REGION`, par défaut `europe`). Tant qu'ils manquent, la fonction répond « Clés BrickLink absentes ».
 
 ### 3. Mettre en ligne (GitHub Pages)
 
@@ -64,7 +65,8 @@ Ces quatre valeurs restent dans Supabase : elles ne sont jamais dans l'app ni su
 | `js/store-supabase.js` | Mode en ligne : compte, achats, prix, appel de la fonction |
 | `supabase/schema.sql` | Tables `owners`, `purchases`, `sets`, `prices`, `runs` et sécurité (RLS) |
 | `supabase/functions/bricklink/` | Fonction serveur : signature OAuth BrickLink, recherche de set, relevé des prix |
-| `supabase/cron.sql` | Relevé planifié du lundi |
+| `supabase/bricklink-editeur.ts` | La même fonction en un seul fichier, à coller dans l'éditeur Supabase (`node tests/build-function.mjs`) |
+| `supabase/cron.sql` | Relevé planifié du lundi et son secret (Vault) |
 | `tests/` | `node tests/logic.test.mjs` ; `tests/schema.test.mjs` (Postgres en mémoire, `npm i @electric-sql/pglite`) |
 
 ## Sécurité (résumé)

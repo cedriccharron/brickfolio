@@ -5,11 +5,11 @@
 //  POST {"action":"refresh"}                    → relève les prix de tous les sets détenus, écrit dans « prices ».
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
-// planifiée (en-tête x-cron-secret = secret CRON_SECRET). Déployer avec « Verify JWT » désactivé
+// planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
 // (supabase functions deploy bricklink --no-verify-jwt) : le contrôle d'accès est fait ici.
 //
 // Secrets (Edge Functions > Secrets) : BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET,
-// BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET, CRON_SECRET ; facultatif : BRICKLINK_REGION (europe).
+// BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { blGet, parseItem, priceGuide } from "./bricklink.js";
 
@@ -43,6 +43,14 @@ async function isOwner(req: Request): Promise<boolean> {
   if (!email) return false;
   const { data: row } = await admin.from("owners").select("email").eq("email", email).maybeSingle();
   return !!row;
+}
+
+// Tâche planifiée : secret généré dans le coffre Supabase (voir supabase/cron.sql).
+async function isCron(req: Request): Promise<boolean> {
+  const s = req.headers.get("x-cron-secret");
+  if (!s) return false;
+  const { data } = await admin.rpc("brickfolio_cron_ok", { s });
+  return data === true;
 }
 
 async function lookup(setNo: string) {
@@ -104,10 +112,8 @@ async function refresh() {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
-  if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 500);
-
-  const fromCron = !!env("CRON_SECRET") && req.headers.get("x-cron-secret") === env("CRON_SECRET");
-  if (!fromCron && !(await isOwner(req))) return json({ error: "Accès refusé" }, 403);
+  if (!(await isCron(req)) && !(await isOwner(req))) return json({ error: "Accès refusé" }, 403);
+  if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
 
   try {
     const body = await req.json().catch(() => ({}));

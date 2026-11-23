@@ -1,14 +1,23 @@
 -- Brickfolio — relevé automatique des prix chaque lundi à 6 h (heure belge, ≈ 5 h UTC).
--- À lancer une fois dans Supabase > SQL Editor, APRÈS avoir déployé la fonction « bricklink »
--- et ajouté le secret CRON_SECRET (Edge Functions > Secrets).
+-- À lancer une fois dans Supabase > SQL Editor, APRÈS avoir déployé la fonction « bricklink ».
+-- Remplace <PROJET> par l'identifiant du projet (dans l'URL : https://<PROJET>.supabase.co).
 --
--- Remplace les deux valeurs entre < > :
---   <PROJET>     : l'identifiant du projet (dans l'URL : https://<PROJET>.supabase.co)
---   <SECRET>     : la valeur choisie pour le secret CRON_SECRET
--- (La fonction doit avoir « Verify JWT » désactivé : elle contrôle elle-même qui l'appelle.)
+-- Le secret qui autorise la tâche planifiée est généré dans le coffre chiffré de Supabase (Vault) :
+-- personne n'a à le connaître. La fonction le vérifie via public.brickfolio_cron_ok (réservée au serveur).
+-- Le script peut être relancé sans danger.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
+
+select vault.create_secret(gen_random_uuid()::text || gen_random_uuid()::text, 'brickfolio_cron_secret', 'Brickfolio : autorise le relevé hebdomadaire')
+where not exists (select 1 from vault.secrets where name = 'brickfolio_cron_secret');
+
+create or replace function public.brickfolio_cron_ok(s text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from vault.decrypted_secrets where name = 'brickfolio_cron_secret' and decrypted_secret = s);
+$$;
+revoke all on function public.brickfolio_cron_ok(text) from public, anon, authenticated;
+grant execute on function public.brickfolio_cron_ok(text) to service_role;
 
 select cron.unschedule('brickfolio-prix-hebdo') where exists (select 1 from cron.job where jobname = 'brickfolio-prix-hebdo');
 
@@ -20,7 +29,7 @@ select cron.schedule(
     url     := 'https://<PROJET>.supabase.co/functions/v1/bricklink',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
-      'x-cron-secret', '<SECRET>'
+      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'brickfolio_cron_secret')
     ),
     body    := '{"action":"refresh"}'::jsonb,
     timeout_milliseconds := 150000
@@ -28,5 +37,6 @@ select cron.schedule(
   $$
 );
 
--- Vérifier : select * from cron.job;   Historique : select * from cron.job_run_details order by start_time desc limit 5;
+-- Vérifier : select jobname, schedule from cron.job;
+-- Historique : select * from cron.job_run_details order by start_time desc limit 5;
 -- Résultat des relevés : select * from public.runs order by id desc limit 5;
