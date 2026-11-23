@@ -1,6 +1,7 @@
 // Stockage en ligne : Supabase (compte e-mail, base de données, fonction « bricklink »).
 // Même interface que store-demo.js.
 import { CONFIG } from "./config.js";
+import { manualRow } from "./invest.js";
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -79,15 +80,19 @@ export async function createSupabaseStore() {
 
     async loadAll() {
       try {
-        const [purchases, prices, sets, runs] = await Promise.all([
+        const [purchases, prices, sets, runs, manual] = await Promise.all([
           sb.from("purchases").select("*").order("bought_on", { ascending: false }),
           sb.from("prices").select("*").order("fetched_on"),
           sb.from("sets").select("*"),
           sb.from("runs").select("*").order("id", { ascending: false }).limit(1),
+          sb.from("manual_values").select("*").order("valued_on"),
         ]);
         const data = {
           purchases: must(purchases).map(fromRow),
-          prices: must(prices).map(priceFromRow),
+          prices: [
+            ...must(prices).map(priceFromRow),
+            ...must(manual).map((r) => manualRow({ id: r.id, setNo: r.set_no, condition: r.condition, on: r.valued_on, value: r.unit_value, note: r.note })),
+          ],
           sets: Object.fromEntries(must(sets).map((r) => [r.set_no, setFromRow(r)])),
           lastRun: must(runs)[0] || null,
         };
@@ -105,6 +110,12 @@ export async function createSupabaseStore() {
       return fromRow(row);
     },
     async deletePurchase(id) { must(await sb.from("purchases").delete().eq("id", id)); },
+
+    // Valeur encodée à la main : m = { setNo, condition, on, value, note }
+    async addManualValue(m) {
+      must(await sb.from("manual_values").insert({ set_no: m.setNo, condition: m.condition, valued_on: m.on, unit_value: m.value, note: m.note || null }));
+    },
+    async deleteManualValue(id) { must(await sb.from("manual_values").delete().eq("id", id)); },
 
     async lookupSet(setNo) {
       const { set } = await call({ action: "lookup", set_no: setNo });

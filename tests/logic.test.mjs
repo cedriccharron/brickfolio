@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
+  manualRow, valueSource,
 } from "../js/invest.js";
 import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
 
@@ -91,6 +92,16 @@ await test("export CSV pour Excel (point-virgule, virgule décimale)", () => {
   const line = csv.split("\r\n")[1];
   assert.ok(line.startsWith('"10294-1";"Titanic";"Neuf";"1";"499,5"'), line);
   assert.ok(line.includes('"boîte ""abîmée"""'));
+});
+
+await test("valeur manuelle : utilisée si plus récente, prime le même jour", () => {
+  const m = (on, value) => manualRow({ id: on, setNo: "10294-1", condition: "N", on, value });
+  const prices = [R("2024-01-01", 600), m("2024-02-01", 650)];
+  assert.equal(position(P(), prices, "2024-03-01").unit, 650);
+  assert.equal(valueSource(latestPrice(prices, "10294-1", "N")), "manuel");
+  assert.equal(position(P(), [...prices, R("2024-03-01", 620)], "2024-03-02").unit, 620);
+  assert.equal(position(P(), [R("2024-03-01", 620), m("2024-03-01", 700)], "2024-03-02").unit, 700);
+  assert.deepEqual(positionHistory(P(), prices).map((x) => x.value), [500, 600, 650]);
 });
 
 // ---------- BrickLink ----------

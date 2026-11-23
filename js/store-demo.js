@@ -1,6 +1,7 @@
 // Stockage du mode démo : tout reste dans ce navigateur, prix simulés.
 // Même interface que store-supabase.js.
 import { uuid } from "./util.js";
+import { manualRow } from "./invest.js";
 
 const KEY = "brickfolio-demo-v1";
 
@@ -93,7 +94,7 @@ export function createDemoStore() {
       if (i >= 0) d.purchases[i] = p; else d.purchases.unshift(p);
       if (!d.sets[p.setNo]) d.sets[p.setNo] = setInfo(p.setNo) || { setNo: p.setNo, name: p.setNo, year: null, image: image(p.setNo) };
       // Un set du catalogue démo reçoit tout de suite son historique simulé.
-      if (DEMO_CATALOG[p.setNo] && !d.prices.some((r) => r.setNo === p.setNo && r.condition === p.condition)) {
+      if (DEMO_CATALOG[p.setNo] && !d.prices.some((r) => r.setNo === p.setNo && r.condition === p.condition && !r.manual)) {
         d.prices.push(...simulate(p.setNo, p.condition));
       }
       write(d);
@@ -102,6 +103,16 @@ export function createDemoStore() {
     async deletePurchase(id) {
       const d = read();
       d.purchases = d.purchases.filter((p) => p.id !== id);
+      write(d);
+    },
+    async addManualValue(m) {
+      const d = read();
+      d.prices.push(manualRow({ ...m, id: uuid() }));
+      write(d);
+    },
+    async deleteManualValue(id) {
+      const d = read();
+      d.prices = d.prices.filter((r) => !(r.manual && r.id === id));
       write(d);
     },
     async lookupSet(setNo) {
@@ -116,12 +127,12 @@ export function createDemoStore() {
       let ok = 0;
       for (const k of pairs) {
         const [no, c] = k.split("|");
-        const rows = d.prices.filter((r) => r.setNo === no && r.condition === c).sort((a, b) => a.on.localeCompare(b.on));
+        const rows = d.prices.filter((r) => r.setNo === no && r.condition === c && !r.manual).sort((a, b) => a.on.localeCompare(b.on));
         const last = rows.at(-1);
         if (!last) continue;
         const rand = rng(no + c + today);
         const avg = Math.round(last.avgSold * (1 + (rand() - 0.47) * 0.04) * 100) / 100;
-        d.prices = d.prices.filter((r) => !(r.setNo === no && r.condition === c && r.on === today));
+        d.prices = d.prices.filter((r) => r.manual || !(r.setNo === no && r.condition === c && r.on === today));
         d.prices.push(row(no, c, today, avg, rand));
         ok++;
       }

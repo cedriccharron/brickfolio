@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const $ = (s, root = document) => root.querySelector(s);
 const inFrame = () => { try { return window.self !== window.top; } catch { return true; } };
 
@@ -185,7 +185,8 @@ function viewDetail(p) {
   const hist = positionHistory(p, S.data.prices);
   const last = pos.row;
   const src = valueSource(last);
-  const recent = rows.slice(-8).reverse();
+  const market = [...rows].reverse().find((r) => !r.manual); // dernier relevé BrickLink
+  const recent = rows.slice(-10).reverse();
 
   return `${top(set?.name || p.setNo, { back: "#/", sub: `${esc(p.setNo)}${set?.year ? ` · ${set.year}` : ""} · ${CONDITIONS[p.condition]}`,
       actions: `<a class="icon-btn" href="#/p/${p.id}/edit" aria-label="Modifier">${icon("edit")}</a>` })}
@@ -203,21 +204,27 @@ function viewDetail(p) {
     </section>
     <section class="panel stats">
       <div><span>Coût total</span><strong>${fmtEur(pos.cost, 2)}</strong><em>${p.qty} × ${fmtEur(p.unitPrice, 2)}${p.fees ? ` + ${fmtEur(p.fees, 2)} de frais` : ""}</em></div>
-      <div><span>Valeur par boîte</span><strong>${pos.unit != null ? fmtEur(pos.unit, 2) : "—"}</strong><em>${src ? `moyenne des ${src} BrickLink` : pos.sold ? "—" : "pas encore de prix"}</em></div>
+      <div><span>Valeur par boîte</span><strong>${pos.unit != null ? fmtEur(pos.unit, 2) : "—"}</strong><em>${src === "manuel" ? `valeur encodée le ${fmtDate(last.on)}` : src ? `moyenne des ${src} BrickLink` : pos.sold ? "—" : "pas encore de prix"}</em></div>
       <div><span>Rendement annualisé</span><strong class="${tone(pos.cagr)}">${fmtPct(pos.cagr)}</strong><em>${pos.cagr == null ? "après 6 mois de détention" : `depuis le ${fmtDate(p.date)}`}</em></div>
       <div><span>${pos.sold ? "Vendu le" : "Acheté le"}</span><strong>${fmtDate(pos.sold ? p.soldDate : p.date)}</strong><em>${esc(pos.sold ? `acheté le ${fmtDate(p.date)}` : p.shop || "")}</em></div>
     </section>
-    ${last ? `<section class="panel">
+    ${market ? `<section class="panel">
       <h2>Marché BrickLink (${CONDITIONS[p.condition].toLowerCase()}, Europe)</h2>
       <div class="market">
-        <div><span>Ventes 6 mois</span><strong>${last.qtySold ?? 0}</strong></div>
-        <div><span>Min / max vendu</span><strong>${last.minSold != null ? `${fmtEur(last.minSold)} – ${fmtEur(last.maxSold)}` : "—"}</strong></div>
-        <div><span>En vente</span><strong>${last.qtyStock ?? 0} dès ${fmtEur(last.minStock)}</strong></div>
+        <div><span>Ventes 6 mois</span><strong>${market.qtySold ?? 0}</strong></div>
+        <div><span>Min / max vendu</span><strong>${market.minSold != null ? `${fmtEur(market.minSold)} – ${fmtEur(market.maxSold)}` : "—"}</strong></div>
+        <div><span>En vente</span><strong>${market.qtyStock ?? 0} dès ${fmtEur(market.minStock)}</strong></div>
       </div>
-      <table class="hist"><thead><tr><th>Relevé</th><th>Moy. ventes</th><th>Moy. annonces</th></tr></thead><tbody>
-        ${recent.map((r) => `<tr><td>${fmtDate(r.on)}</td><td>${fmtEur(r.avgSold, 2)}</td><td>${fmtEur(r.avgStock, 2)}</td></tr>`).join("")}
-      </tbody></table>
     </section>` : ""}
+    <section class="panel">
+      <div class="panel-head"><h2>Valeurs d'une boîte</h2>${pos.sold ? "" : `<button class="btn ghost small" data-action="manual" data-id="${p.id}">${icon("edit", 16)} Encoder</button>`}</div>
+      ${recent.length ? `<table class="hist"><thead><tr><th>Date</th><th>Source</th><th>Valeur</th><th></th></tr></thead><tbody>
+        ${recent.map((r) => `<tr><td>${fmtDate(r.on)}</td>
+          <td>${r.manual ? `<span class="tag">manuel</span>${r.note ? `<span class="muted small note-cell">${esc(r.note)}</span>` : ""}` : r.avgSold != null ? "ventes" : "annonces"}</td>
+          <td>${fmtEur(unitValue(r), 2)}</td>
+          <td>${r.manual ? `<button class="icon-btn mini" data-action="del-manual" data-id="${esc(r.id)}" aria-label="Supprimer cette valeur">${icon("trash", 16)}</button>` : ""}</td></tr>`).join("")}
+      </tbody></table>` : `<p class="muted small">Aucune valeur pour l'instant. Encode ta propre estimation (BrickEconomy, 2ememain, Vinted…) en attendant le relevé BrickLink.</p>`}
+    </section>
     ${p.notes ? `<section class="panel"><h2>Notes</h2><p class="notes">${esc(p.notes)}</p></section>` : ""}
     <div class="form-actions">
       <a class="btn ghost" href="${blUrl(p.setNo)}" target="_blank" rel="noopener">${icon("external", 18)} BrickLink</a>
@@ -372,6 +379,36 @@ async function refreshPrices(silent = false) {
   }
 }
 
+// ---------- Valeur manuelle ---------------------------------------------------------
+function manualDialog(p) {
+  const dlg = $("#dialog");
+  if (dlg.open) dlg.close();
+  const last = position(p, S.data.prices).unit;
+  dlg.innerHTML = `<form method="dialog" class="dlg" id="manual-form">
+    <h2>Valeur d'une boîte</h2>
+    <p class="muted small">${esc(nameOf(p.setNo))} · ${CONDITIONS[p.condition].toLowerCase()}. Elle remplace la valeur actuelle jusqu'au prochain relevé BrickLink plus récent.</p>
+    <label class="field"><span>Valeur par boîte (€)</span><input name="value" inputmode="decimal" placeholder="${last != null ? esc(String(last).replace(".", ",")) : "0,00"}" required autofocus></label>
+    <label class="field"><span>Date</span><input name="on" type="date" value="${todayIso()}" max="${todayIso()}" required></label>
+    <label class="field"><span>Source (facultatif)</span><input name="note" placeholder="BrickEconomy, 2ememain, Vinted…" maxlength="120"></label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost" formnovalidate>Annuler</button>
+      <button value="ok" class="btn primary">Enregistrer</button>
+    </div></form>`;
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok") return;
+    const fd = new FormData($("#manual-form"));
+    const value = parseAmount(fd.get("value"));
+    if (value == null || Number.isNaN(value) || value < 0) return toast("Valeur invalide", "error");
+    try {
+      await S.store.addManualValue({ setNo: p.setNo, condition: p.condition, on: fd.get("on"), value, note: String(fd.get("note") || "").trim() });
+      await reload();
+      toast("Valeur enregistrée");
+    } catch (e) { toast(e.message, "error"); }
+  };
+  dlg.returnValue = "";
+  dlg.showModal();
+}
+
 // ---------- Événements ------------------------------------------------------------
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-action]");
@@ -380,6 +417,12 @@ document.addEventListener("click", async (e) => {
   if (a === "filter") { S.filter = el.dataset.v; render(); }
   else if (a === "refresh") refreshPrices();
   else if (a === "lookup") lookup();
+  else if (a === "manual") manualDialog(purchase(el.dataset.id));
+  else if (a === "del-manual") {
+    if (!(await confirmDialog("Supprimer cette valeur encodée ?", "Supprimer"))) return;
+    try { await S.store.deleteManualValue(el.dataset.id); await reload(); toast("Valeur supprimée"); }
+    catch (err) { toast(err.message, "error"); }
+  }
   else if (a === "toggle-sold") $("#sold-fields").classList.toggle("hidden", !el.checked);
   else if (a === "delete") {
     if (!(await confirmDialog("Supprimer cet achat et son historique ?", "Supprimer"))) return;
@@ -408,6 +451,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("submit", async (e) => {
+  if (e.target.method === "dialog") return; // fenêtres de dialogue : le navigateur les ferme lui-même
   e.preventDefault();
   if (e.target.id === "purchase-form") savePurchase();
   else if (e.target.id === "login-form") {

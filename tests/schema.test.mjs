@@ -53,4 +53,13 @@ assert.ok(new Date(u2) >= new Date(u1)); ok("vente enregistrée, date de mise à
 await q(`reset role; insert into public.prices (set_no, condition, avg_sold) values ('10294-1','N',620) on conflict (set_no, condition, fetched_on) do update set avg_sold = excluded.avg_sold`);
 assert.equal((await as("a", `select avg_sold::float v from prices where condition='N'`))[0].v, 620); ok("un relevé par set, état et jour (upsert)");
 
+// Valeurs manuelles : chacun les siennes.
+await as("a", `insert into manual_values (set_no, condition, valued_on, unit_value) values ('10294-1','N','2026-11-20',640)`);
+ok("valeur manuelle encodée");
+assert.equal((await as("a", `select count(*)::int c from manual_values`))[0].c, 1);
+assert.equal((await as("b", `select count(*)::int c from manual_values`))[0].c, 0); ok("invisible pour l'autre compte");
+assert.equal((await as("b", `delete from manual_values returning id`)).length, 0); ok("ni supprimable par lui");
+await assert.rejects(as("c", `insert into manual_values (set_no, unit_value) values ('1-1', 1)`), /row-level security/); ok("refusée à un compte non autorisé");
+assert.equal((await as("a", `delete from manual_values returning id`)).length, 1); ok("supprimable par son auteur");
+
 console.log(`\n${n} vérifications réussies`);

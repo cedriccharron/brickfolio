@@ -59,6 +59,19 @@ create table if not exists public.prices (
   unique (set_no, condition, fetched_on)
 );
 
+-- Valeurs encodées à la main (estimation personnelle, BrickEconomy, 2ememain…), propres à chaque compte.
+create table if not exists public.manual_values (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users on delete cascade,
+  set_no      text not null,
+  condition   text not null default 'N' check (condition in ('N', 'U')),
+  valued_on   date not null default current_date,
+  unit_value  numeric(10,2) not null check (unit_value >= 0),  -- valeur d'une boîte (€)
+  note        text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists manual_values_owner on public.manual_values (owner);
+
 -- Journal des relevés.
 create table if not exists public.runs (
   id           bigserial primary key,
@@ -82,10 +95,16 @@ alter table public.purchases enable row level security;
 alter table public.sets      enable row level security;
 alter table public.prices    enable row level security;
 alter table public.runs      enable row level security;
+alter table public.manual_values enable row level security;
 
 -- Chaque compte autorisé ne voit et ne modifie que ses propres achats.
 drop policy if exists purchases_rw on public.purchases;
 create policy purchases_rw on public.purchases for all to authenticated
+  using (owner = auth.uid() and public.is_owner())
+  with check (owner = auth.uid() and public.is_owner());
+
+drop policy if exists manual_values_rw on public.manual_values;
+create policy manual_values_rw on public.manual_values for all to authenticated
   using (owner = auth.uid() and public.is_owner())
   with check (owner = auth.uid() and public.is_owner());
 

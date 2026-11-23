@@ -25,13 +25,18 @@ export function unitValue(row) {
   if (!row) return null;
   return num(row.avgSold) ?? num(row.avgStock);
 }
-export const valueSource = (row) => (!row ? null : num(row.avgSold) != null ? "ventes" : num(row.avgStock) != null ? "annonces" : null);
+export const valueSource = (row) =>
+  (!row ? null : row.manual ? "manuel" : num(row.avgSold) != null ? "ventes" : num(row.avgStock) != null ? "annonces" : null);
+
+// Valeur encodée à la main → relevé (manual: true), fusionné avec les relevés BrickLink.
+export const manualRow = (m) => ({ id: m.id, setNo: m.setNo, condition: m.condition, on: m.on, avgSold: Number(m.value), note: m.note || "", manual: true });
 
 // Relevés d'un set dans un état donné, du plus ancien au plus récent.
+// Le même jour, la valeur manuelle passe après (donc prime sur) le relevé BrickLink.
 export function pricesFor(prices, setNo, condition) {
   return prices
     .filter((r) => r.setNo === setNo && r.condition === condition)
-    .sort((a, b) => a.on.localeCompare(b.on));
+    .sort((a, b) => a.on.localeCompare(b.on) || (a.manual ? 1 : 0) - (b.manual ? 1 : 0));
 }
 
 // Dernier relevé utilisable (avec une valeur) à une date donnée (incluse), ou le plus récent.

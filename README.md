@@ -2,12 +2,13 @@
 
 Portefeuille d'investissement LEGO : tu enregistres tes achats, l'app relève chaque semaine leur valeur sur BrickLink et calcule ta plus-value. Application web installable (PWA), même architecture que Cap'taine : JavaScript sans compilation, hébergement GitHub Pages, Supabase pour les données et le relevé automatique des prix.
 
-## Ce que fait la version 0.1
+## Ce que fait la version 0.2
 
 - **Achats** : numéro du set (recherche du nom et de l'image sur BrickLink), neuf ou occasion, quantité, prix payé, frais, date, boutique, notes.
 - **Ventes** : « Vendu » enregistre le prix de vente net ; la plus-value passe en « réalisée ».
 - **Valeur** : moyenne des ventes BrickLink des 6 derniers mois, en Europe, TVA comprise, dans l'état de l'achat. S'il n'y a eu aucune vente, moyenne des annonces en cours. Un set sans prix est compté à son coût.
 - **Analyse** : valeur totale, montant investi, plus-value latente et réalisée, rendement par set et rendement annualisé (après 6 mois de détention), courbe du portefeuille et de chaque set, détail du marché (nombre de ventes, min/max, annonces).
+- **Valeur manuelle** : sur la fiche d'un set, « Encoder » une valeur par boîte (BrickEconomy, 2ememain, estimation…). Elle sert de valeur actuelle jusqu'à un relevé BrickLink plus récent, apparaît dans l'historique et la courbe, et peut être supprimée. Chaque compte a les siennes.
 - **Relevé automatique** chaque lundi à 6 h, plus un bouton « Mettre à jour maintenant ». Un nouveau set est relevé dès son enregistrement.
 - **Export** CSV pour Excel ou Numbers.
 
@@ -63,7 +64,7 @@ Brickfolio partage le projet Supabase de Cap'taine (`zzhzdiuoonhvxndmziju`) : le
 | `js/chart.js` | Courbes SVG |
 | `js/store-demo.js` | Mode démo (navigateur, prix simulés) |
 | `js/store-supabase.js` | Mode en ligne : compte, achats, prix, appel de la fonction |
-| `supabase/schema.sql` | Tables `owners`, `purchases`, `sets`, `prices`, `runs` et sécurité (RLS) |
+| `supabase/schema.sql` | Tables `owners`, `purchases`, `sets`, `prices`, `manual_values`, `runs` et sécurité (RLS) |
 | `supabase/functions/bricklink/` | Fonction serveur : signature OAuth BrickLink, recherche de set, relevé des prix |
 | `supabase/bricklink-editeur.ts` | La même fonction en un seul fichier, à coller dans l'éditeur Supabase (`node tests/build-function.mjs`) |
 | `supabase/cron.sql` | Relevé planifié du lundi et son secret (Vault) |
