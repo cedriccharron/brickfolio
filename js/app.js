@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, project, splitSale, cost,
 } from "./invest.js";
 
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -132,7 +132,7 @@ function viewRows(rows) {
   return sortRows(filterRows(byStatus, S.f), S.sort, !!S.f.reverse);
 }
 
-const PERIODS = { m3: ["3 mois", 91], y1: ["1 an", 365], all: ["Tout", null] };
+const PERIODS = { m3: ["3 derniers mois", 91], y1: ["12 derniers mois", 365], all: ["Depuis le début", null] };
 const cutoff = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); };
 const pctTag = (x, label = "") => (x == null ? "" : `<span class="trend ${tone(x)}">${x > 0.0005 ? "↗" : x < -0.0005 ? "↘" : "→"} ${fmtPct(x)}${label ? ` <em>${label}</em>` : ""}</span>`);
 const days2txt = (d) => (d == null ? "—" : d < 60 ? `${d} j` : d < 730 ? `${Math.round(d / 30.4)} mois` : `${(d / 365).toFixed(1).replace(".", ",")} ans`);
@@ -177,11 +177,10 @@ function viewPortfolio() {
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
     <section class="panel">
-      <div class="panel-head"><h2>Évolution</h2>
-        <div class="chips">${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
-      </div>
+      <div class="panel-head"><h2>Évolution passée</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi</span></div>
+      <div class="chips period">${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
       ${lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), up: gain >= 0, label: "Valeur du portefeuille" })}
-      <p class="legend-line"><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi</span></p>
+      <p class="muted tiny chart-hint">Glisse le doigt sur la courbe pour lire la valeur à une date. La courbe commence à ton premier achat ; la valeur du marché n'est connue qu'à partir du premier relevé de prix.</p>
     </section>
 
     <div class="seg view-seg" role="tablist">
@@ -305,8 +304,10 @@ function viewDetail(p) {
     </div>
     <section class="panel">
       <div class="panel-head"><h2>Valeur de ta position</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Coût</span></div>
-      ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null, up: (pos.gain ?? 0) >= 0, label: "Valeur de la position" })}
+      ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null, up: (pos.gain ?? 0) >= 0, label: "Valeur de la position",
+        names: ["Valeur", "Coût"], marks: pos.sold ? [{ on: p.soldDate, text: "vente" }] : [] })}
     </section>
+    ${marketChart(p, rows)}
     <section class="panel stats">
       <div><span>Coût total</span><strong>${fmtEur(pos.cost, 2)}</strong><em>${p.qty} × ${fmtEur(p.unitPrice, 2)}${p.fees ? ` + ${fmtEur(p.fees, 2)} de frais` : ""}</em></div>
       <div><span>Valeur par boîte</span><strong>${pos.unit != null ? fmtEur(pos.unit, 2) : "—"}</strong><em>${src === "manuel" ? `valeur encodée le ${fmtDate(last.on)}` : src ? `moyenne des ${src} BrickLink` : pos.sold ? "—" : "pas encore de prix"}</em></div>
@@ -390,6 +391,20 @@ async function viewInvoice(p) {
   dlg.onclose = () => { if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 60000); };
   dlg.returnValue = "";
   dlg.showModal();
+}
+
+// Prix d'une boîte sur le marché depuis le premier relevé (y compris avant l'achat), avec le prix payé.
+function marketChart(p, rows) {
+  const pts = rows.map((r) => ({ on: r.on, value: unitValue(r) }));
+  if (new Set(pts.map((x) => x.on)).size < 2) return "";
+  const paid = Number(p.unitPrice) + (Number(p.fees) || 0) / (Number(p.qty) || 1);
+  const marks = [{ on: p.date, text: "achat" }, ...(isSold(p) ? [{ on: p.soldDate, text: "vente" }] : [])];
+  const up = pts.at(-1).value >= paid;
+  return `<section class="panel">
+    <div class="panel-head"><h2>Prix d'une boîte</h2><span class="legend"><i class="lg-line"></i>Marché <i class="lg-ref"></i>Payé</span></div>
+    ${lineChart({ main: pts, ref: [{ on: pts[0].on, value: paid }, { on: pts.at(-1).on, value: paid }], up, label: "Prix d'une boîte sur le marché", names: ["Marché", "Payé"], marks })}
+    <p class="muted tiny chart-hint">Depuis le premier relevé${pts[0].on < p.date ? ", avant et après ton achat" : ""} · prix payé par boîte : ${fmtEur(paid, 2)}${p.fees ? " (frais compris)" : ""}.</p>
+  </section>`;
 }
 
 function trendPanel(p, pos) {

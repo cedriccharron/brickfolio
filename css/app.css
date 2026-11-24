@@ -295,3 +295,15 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .sell-preview { margin: 6px 0 14px; }
 .sell-preview .kpis { margin-top: 4px; }
 .sell-preview p { margin: 8px 0 0; }
+/* Graphique : axe du temps, repères, lecture au doigt */
+.chart { touch-action: pan-y; }
+.c-tick { stroke: var(--line); stroke-width: 1; }
+.c-mark { stroke: var(--hero); stroke-width: 1; stroke-dasharray: 2 3; opacity: .6; }
+.c-mark-lbl { fill: var(--hero); font-weight: 700; }
+.c-hline { stroke: var(--ink-2); stroke-width: 1; opacity: .5; }
+.c-hdot { fill: var(--surface); stroke: var(--hero); stroke-width: 2; }
+.c-tip { fill: var(--hero); opacity: .94; }
+.c-tip-t, .c-tip-t2 { fill: var(--hero-ink); font-size: 10.5px; font-weight: 600; }
+.c-tip-t2 { font-weight: 400; opacity: .85; }
+.chart-hint { margin: 4px 0 0; }
+.chips.period { margin: 8px 0 4px; flex-wrap: wrap; }
