@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.4.2";
+const VERSION = "0.4.3";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -309,7 +309,10 @@ function viewForm(p) {
         <span class="hint">Le numéro est imprimé sur la boîte. « 75192 » devient « 75192-1 » comme sur BrickLink.</span>
       </label>
       ${d.found ? `<div class="found">${thumb(d.found.setNo)}<div><strong>${esc(d.found.name)}</strong><span class="muted small">${esc(d.found.setNo)}${d.found.year ? ` · ${d.found.year}` : ""}</span></div></div>`
-        : d.lookedUp ? `<p class="warn small">Set introuvable sur BrickLink : vérifie le numéro (tu peux quand même l'enregistrer).</p>` : ""}
+        : d.lookupError ? `${d.scanName ? `<div class="found">${thumb(normalizeSetNo(d.setNo))}<div><strong>${esc(d.scanName)}</strong><span class="muted small">nom lu sur la facture</span></div></div>` : ""}
+            <p class="muted small">Catalogue BrickLink indisponible pour l'instant : le nom et l'image du set seront complétés au premier relevé. Tu peux enregistrer.</p>`
+        : d.lookedUp ? `<p class="warn small">Set introuvable sur BrickLink : vérifie le numéro (tu peux quand même l'enregistrer).</p>`
+        : d.scanName && d.setNo ? `<div class="found">${thumb(normalizeSetNo(d.setNo))}<div><strong>${esc(d.scanName)}</strong><span class="muted small">nom lu sur la facture</span></div></div>` : ""}
       <fieldset class="field"><legend>État</legend>
         <div class="seg">${Object.entries(CONDITIONS).map(([k, l]) => `<label class="seg-opt"><input type="radio" name="condition" value="${k}" ${d.condition === k ? "checked" : ""}>${l}</label>`).join("")}</div>
       </fieldset>
@@ -388,7 +391,7 @@ function applyScan(i) {
   const it = invoice.items[i];
   d.scanItem = it ? i : null;
   if (!it) return;
-  Object.assign(d, { setNo: it.set_no || "", qty: it.qty, unitPrice: it.unit_price ?? "", found: it.set_no ? S.data.sets[it.set_no] || null : null, lookedUp: false });
+  Object.assign(d, { setNo: it.set_no || "", qty: it.qty, unitPrice: it.unit_price ?? "", found: it.set_no ? S.data.sets[it.set_no] || null : null, lookedUp: false, lookupError: null, scanName: it.name || null });
   if (it.condition) d.condition = it.condition;
 }
 
@@ -429,6 +432,10 @@ function readForm() {
   const f = $("#purchase-form");
   if (!f) return;
   const fd = new FormData(f);
+  // Numéro changé à la main : le nom lu sur la facture et la dernière recherche ne valent plus.
+  if (fd.get("setNo") != null && normalizeSetNo(fd.get("setNo")) !== normalizeSetNo(S.draft.setNo || "")) {
+    Object.assign(S.draft, { scanName: null, lookupError: null, lookedUp: false, found: null });
+  }
   Object.assign(S.draft, {
     setNo: fd.get("setNo"), condition: fd.get("condition") || "N", qty: fd.get("qty"), unitPrice: fd.get("unitPrice"),
     fees: fd.get("fees"), date: fd.get("date"), shop: fd.get("shop"), notes: fd.get("notes"),
@@ -446,7 +453,12 @@ async function lookup() {
   try {
     S.draft.found = S.data.sets[no] || await S.store.lookupSet(no);
     if (S.draft.found) S.data.sets[no] = S.draft.found;
-  } catch (e) { toast(e.message, "error"); S.draft.found = null; }
+    S.draft.lookupError = null;
+  } catch (e) {
+    // BrickLink indisponible (clés pas encore installées, panne) : pas une erreur de l'utilisateur.
+    S.draft.found = null;
+    S.draft.lookupError = e.message;
+  }
   S.draft.lookedUp = true;
   render();
 }
@@ -537,7 +549,8 @@ async function refreshPrices(silent = false) {
     await reload();
     toast(r.failed ? `${r.ok} prix relevés, ${r.failed} échec(s)` : silent ? "Prix BrickLink relevé" : `${r.ok} prix relevés`, r.failed ? "error" : "info");
   } catch (e) {
-    toast(e.message, "error");
+    // Relevé automatique après un nouvel achat : on ne dérange pas si BrickLink n'est pas encore branché.
+    if (!silent) toast(e.message, "error");
   } finally {
     S.busy = false;
     render();
