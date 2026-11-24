@@ -244,3 +244,6 @@ label.btn { cursor: pointer; }
 .scan-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
 .scan-item.on { border-color: var(--hero); box-shadow: 0 0 0 1px var(--hero); }
 .scan-item.done { opacity: .6; }
+.scan-text { margin-top: 10px; }
+.scan-text summary { cursor: pointer; }
+.scan-text pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px; overflow: auto; background: #f6f4ee; border-radius: 8px; padding: 8px; margin: 6px 0 0; }

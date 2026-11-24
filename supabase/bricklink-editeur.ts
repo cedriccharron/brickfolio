@@ -1,12 +1,10 @@
 // @ts-nocheck
-// Fichier généré par tests/build-function.mjs (index.ts + bricklink.js + facture.js) pour l'éditeur Supabase.
+// Fichier généré par tests/build-function.mjs (index.ts + bricklink.js) pour l'éditeur Supabase.
 // Brickfolio — fonction Supabase « bricklink ».
 // Garde les clés BrickLink côté serveur (jamais dans le navigateur).
 //
 //  POST {"action":"lookup","set_no":"75192-1"}  → fiche du set (nom, année, image), mise en cache dans « sets ».
 //  POST {"action":"refresh"}                    → relève les prix de tous les sets détenus, écrit dans « prices ».
-//  POST {"action":"invoice","media_type":"application/pdf","data":"<base64>"}
-//                                               → lit une facture avec Claude : vendeur, date, sets, prix (rien n'est enregistré).
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
 // planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
@@ -14,9 +12,7 @@
 //
 // Secrets (Edge Functions > Secrets) : BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET,
 // BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
-// Lecture des factures : ANTHROPIC_API_KEY (console.anthropic.com).
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import Anthropic from "npm:@anthropic-ai/sdk";
 
 // Accès à l'API BrickLink (https://www.bricklink.com/v3/api.page) : signature OAuth 1.0
 // et lecture des réponses. Fonctionne dans Deno (fonction Supabase) et Node (tests).
@@ -117,106 +113,6 @@ async function priceGuide(setNo, condition, keys, { region = "europe", currency 
   };
 }
 
-// Lecture d'une facture par Claude : consigne, format de réponse et contrôle du résultat.
-// Partagé entre la fonction Supabase (Deno) et les tests Node.
-
-const INVOICE_MODEL = "claude-opus-5-5";
-const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"];
-const INVOICE_MAX_BYTES = 8 * 1024 * 1024; // fichier encodé reçu par la fonction
-
-const nullable = (type) => ({ anyOf: [{ type }, { type: "null" }] });
-
-const INVOICE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["shop", "date", "currency", "shipping", "items", "warning"],
-  properties: {
-    shop: nullable("string"),
-    date: nullable("string"),
-    currency: nullable("string"),
-    shipping: nullable("number"),
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["set_no", "name", "qty", "unit_price", "condition"],
-        properties: {
-          set_no: nullable("string"),
-          name: { type: "string" },
-          qty: { type: "integer" },
-          unit_price: nullable("number"),
-          condition: { anyOf: [{ type: "string", enum: ["N", "U"] }, { type: "null" }] },
-        },
-      },
-    },
-    warning: nullable("string"),
-  },
-};
-
-const INVOICE_PROMPT = `Voici une facture, un ticket de caisse ou une confirmation de commande. Relève les achats de sets LEGO qu'elle contient.
-
-- shop : le vendeur, en quelques mots (ex. « LEGO Store Bruxelles », « Amazon.fr », « Fnac », « Vinted »).
-- date : la date d'achat ou de commande, au format AAAA-MM-JJ.
-- currency : la devise (code ISO, ex. EUR).
-- shipping : le total des frais de port ou de livraison, sinon 0 s'ils sont indiqués gratuits, sinon null.
-- items : un élément par set LEGO (ignore les sacs, cartes cadeaux, produits non LEGO et lignes de remise).
-  - set_no : le numéro du set LEGO (souvent 4 à 6 chiffres dans le nom ou la référence, ex. 10294), sans tiret. null si absent.
-  - name : le nom tel qu'il apparaît.
-  - qty : le nombre de boîtes.
-  - unit_price : le prix réellement payé pour UNE boîte, TVA comprise, après les remises de la ligne. Si une remise porte sur toute la commande (code promo, réduction en caisse), répartis-la entre les sets au prorata de leur prix. Sans les frais de port.
-  - condition : "U" si l'achat est clairement d'occasion (Vinted, 2ememain, « occasion »), "N" si neuf, null si on ne sait pas.
-- warning : une phrase courte en français s'il y a un doute (montant illisible, plusieurs devises, document qui n'est pas une facture…), sinon null.
-
-N'invente rien : mets null pour ce qui n'est pas lisible.`;
-
-// Paramètres de l'appel à l'API Messages (le fichier est envoyé en base64).
-function invoiceRequest(mediaType, data) {
-  const file = mediaType === "application/pdf"
-    ? { type: "document", source: { type: "base64", media_type: mediaType, data } }
-    : { type: "image", source: { type: "base64", media_type: mediaType, data } };
-  return {
-    model: INVOICE_MODEL,
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default", // si le modèle refuse, l'API relance la demande sur le modèle de repli recommandé
-    output_config: { effort: "low", format: { type: "json_schema", schema: INVOICE_SCHEMA } },
-    messages: [{ role: "user", content: [file, { type: "text", text: INVOICE_PROMPT }] }],
-  };
-}
-
-const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null);
-const isoDate = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) ? v : null);
-const setNo = (v) => {
-  const s = String(v ?? "").trim().toUpperCase().replace(/\s+/g, "");
-  if (!/^[0-9A-Z]{3,10}(-\d+)?$/.test(s)) return null;
-  return s.includes("-") ? s : `${s}-1`;
-};
-
-// Réponse du modèle → résultat propre pour l'app.
-function parseInvoice(response) {
-  if (response.stop_reason === "refusal") throw new Error("La lecture de cette facture a été refusée");
-  if (response.stop_reason === "max_tokens") throw new Error("Facture trop longue à lire");
-  const text = (response.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  let raw;
-  try { raw = JSON.parse(text); } catch { throw new Error("Réponse illisible, réessaie"); }
-  const items = (Array.isArray(raw.items) ? raw.items : []).map((it) => ({
-    set_no: setNo(it.set_no),
-    name: String(it.name || "").trim().slice(0, 200),
-    qty: Number.isInteger(it.qty) && it.qty > 0 ? it.qty : 1,
-    unit_price: num(it.unit_price),
-    condition: it.condition === "U" || it.condition === "N" ? it.condition : null,
-  }));
-  return {
-    shop: typeof raw.shop === "string" ? raw.shop.trim().slice(0, 80) || null : null,
-    date: isoDate(raw.date),
-    currency: typeof raw.currency === "string" ? raw.currency.trim().toUpperCase().slice(0, 3) || null : null,
-    shipping: num(raw.shipping),
-    items,
-    warning: typeof raw.warning === "string" ? raw.warning.trim().slice(0, 300) || null : null,
-  };
-}
-
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const keys = {
@@ -272,25 +168,6 @@ async function lookup(setNo: string) {
   }
 }
 
-// Facture → { shop, date, currency, shipping, items: [{ set_no, name, qty, unit_price, condition }], warning }
-async function readInvoice(mediaType: string, data: string) {
-  const apiKey = env("ANTHROPIC_API_KEY");
-  if (!apiKey) return json({ error: "Clé Anthropic absente : ajoute ANTHROPIC_API_KEY dans Edge Functions > Secrets" }, 503);
-  if (!INVOICE_TYPES.includes(mediaType)) return json({ error: "Format non lisible : envoie un PDF ou une photo JPEG / PNG" }, 400);
-  if (!data || data.length > INVOICE_MAX_BYTES * 1.37) return json({ error: "Fichier trop lourd pour être lu (8 Mo au plus)" }, 413);
-  const client = new Anthropic({ apiKey, timeout: 100_000, maxRetries: 1 });
-  try {
-    const response = await client.beta.messages.create(invoiceRequest(mediaType, data));
-    return json({ invoice: parseInvoice(response) });
-  } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) return json({ error: "Clé Anthropic refusée : vérifie ANTHROPIC_API_KEY" }, 502);
-    if (e instanceof Anthropic.RateLimitError) return json({ error: "Trop de lectures d'un coup, réessaie dans une minute" }, 429);
-    if (e instanceof Anthropic.BadRequestError) return json({ error: `Facture refusée par Claude : ${e.message}` }, 400);
-    if (e instanceof Anthropic.APIError) return json({ error: `Service de lecture indisponible (${e.status ?? "réseau"})` }, 502);
-    return json({ error: (e as Error).message }, 500);
-  }
-}
-
 async function refresh() {
   const started = Date.now();
   const { data: run } = await admin.from("runs").insert({ started_at: new Date().toISOString() }).select("id").single();
@@ -337,14 +214,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
   if (!(await isCron(req)) && !(await isOwner(req))) return json({ error: "Accès refusé" }, 403);
+  if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
 
   try {
     const body = await req.json().catch(() => ({}));
-    if (body.action === "invoice") {
-      if (await isCron(req)) return json({ error: "Accès refusé" }, 403);
-      return await readInvoice(String(body.media_type || ""), String(body.data || ""));
-    }
-    if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
     if (body.action === "lookup") {
       const setNo = String(body.set_no || "").trim().toUpperCase();
       if (!/^[0-9A-Z]+(-\d+)?$/.test(setNo)) return json({ error: "Numéro de set invalide" }, 400);

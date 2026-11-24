@@ -144,10 +144,6 @@ export async function createSupabaseStore() {
       const { set } = await call({ action: "lookup", set_no: setNo });
       return set ? setFromRow(set) : null;
     },
-    // Lecture d'une facture par Claude (via la fonction) : { mediaType, data (base64) }
-    async scanInvoice({ mediaType, data }) {
-      return (await call({ action: "invoice", media_type: mediaType, data })).invoice;
-    },
     async refreshPrices() {
       return await call({ action: "refresh" });
     },

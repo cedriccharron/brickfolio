@@ -338,7 +338,7 @@ function viewForm(p) {
 const newDraft = () => ({ id: "new", setNo: "", condition: "N", qty: 1, unitPrice: "", fees: "", date: todayIso(), shop: "", notes: "",
   soldPrice: null, soldDate: null, found: null, sold: false, invoiceFile: null, scanning: false, scanItem: null });
 
-// Encart « Facture » du nouvel achat : lecture par Claude, ou simple pièce jointe.
+// Encart « Facture » du nouvel achat : lecture sur l'appareil (texte du PDF ou OCR de la photo), ou simple pièce jointe.
 function invoiceBox(d) {
   const input = (action) => `<input type="file" accept="application/pdf,image/*" data-action="${action}" hidden>`;
   if (!d.invoiceFile) {
@@ -347,18 +347,16 @@ function invoiceBox(d) {
         <label class="btn primary small">${icon("scan", 16)} Lire une facture${input("scan-file")}</label>
         <label class="btn ghost small">${icon("clip", 16)} Joindre sans lire${input("attach-file")}</label>
       </div>
-      <p class="hint">« Lire » remplit le formulaire à partir du PDF ou de la photo de la facture ; vérifie avant d'enregistrer. Dans les deux cas, la facture est jointe à l'achat.</p>
+      <p class="hint">« Lire » essaie de remplir le formulaire à partir du PDF ou de la photo (lecture sur ton appareil, gratuite) ; vérifie toujours avant d'enregistrer. Dans les deux cas, la facture est jointe à l'achat.</p>
     </div>`;
   }
   const sc = S.scan?.file === d.invoiceFile ? S.scan : null;
   const inv = sc?.invoice;
   const isPdf = d.invoiceFile.type === "application/pdf";
-  const status = d.scanning ? `<span class="muted small">Lecture en cours…</span>`
+  const status = d.scanning ? `<span class="muted small" id="scan-progress">${esc(d.progress || "Lecture en cours…")}</span>`
     : inv ? `<span class="small up">Lue : vérifie les champs ci-dessous</span>` : `<span class="muted small">Jointe sans lecture</span>`;
   const notes = [];
   if (inv?.warning) notes.push(esc(inv.warning));
-  if (inv?.currency && inv.currency !== "EUR") notes.push(`Montants en ${esc(inv.currency)} : convertis-les en euros.`);
-  if (inv && !inv.items.length) notes.push("Aucun set LEGO reconnu : complète le formulaire à la main.");
   return `<div class="scan-box">
     <div class="scan-file">
       <span class="invoice-ic">${icon(isPdf ? "file" : "photo", 22)}</span>
@@ -371,6 +369,7 @@ function invoiceBox(d) {
         <strong>${esc(it.name || it.set_no || "Set")}</strong>
         <span class="muted small">${esc(it.set_no || "n° ?")} · ×${it.qty} · ${it.unit_price != null ? fmtEur(it.unit_price, 2) : "prix ?"}${sc.used.has(i) ? " · déjà enregistré" : ""}</span>
       </button>`).join("")}</div>` : ""}
+    ${sc?.text ? `<details class="scan-text"><summary class="small muted">Voir le texte lu</summary><pre>${esc(sc.text.trim().slice(0, 4000))}</pre></details>` : ""}
   </div>`;
 }
 
@@ -378,35 +377,6 @@ const invoiceType = (file) => {
   const type = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : /\.(heic|heif)$/i.test(file.name) ? "image/heic" : "");
   return INVOICE_TYPES.includes(type) ? type : null;
 };
-const toBase64 = (blob) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(",")[1]);
-  r.onerror = () => reject(new Error("Fichier illisible"));
-  r.readAsDataURL(blob);
-});
-
-// Ce qui part à la lecture : le PDF tel quel, une photo réduite à 2000 px en JPEG (plus rapide, et le HEIC de l'iPhone devient lisible).
-async function scanPayload(file) {
-  if (file.type === "application/pdf") {
-    if (file.size > 8 * 1024 * 1024) throw new Error("PDF trop lourd pour être lu (8 Mo au plus) : joins-le sans lecture");
-    return { mediaType: "application/pdf", data: await toBase64(file) };
-  }
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = url; });
-    const k = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement("canvas");
-    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
-    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
-    if (!blob) throw new Error();
-    return { mediaType: "image/jpeg", data: await toBase64(blob) };
-  } catch {
-    throw new Error("Photo illisible par le navigateur : fais une capture d'écran de la facture, ou joins-la sans lecture");
-  } finally { URL.revokeObjectURL(url); }
-}
-
 // Remplit le brouillon avec l'en-tête de la facture et la ligne i.
 function applyScan(i) {
   const { invoice, used } = S.scan;
@@ -434,8 +404,12 @@ async function pickInvoice(file, read) {
   draft.scanning = true;
   render();
   try {
-    const invoice = await S.store.scanInvoice(await scanPayload(draft.invoiceFile));
-    S.scan = { file: draft.invoiceFile, invoice, used: new Set() };
+    const { readInvoiceFile } = await import("./invoice-read.js");
+    const { invoice, text } = await readInvoiceFile(draft.invoiceFile, {
+      knownSets: Object.keys(S.data.sets),
+      onProgress: (msg) => { draft.progress = msg; const el = $("#scan-progress"); if (el) el.textContent = msg; },
+    });
+    S.scan = { file: draft.invoiceFile, invoice, text, used: new Set() };
     draft.scanning = false;
     if (S.draft !== draft) return; // formulaire quitté entre-temps
     applyScan(0);

@@ -144,18 +144,6 @@ export function createDemoStore() {
       d.prices = d.prices.filter((r) => !(r.manual && r.id === id));
       write(d);
     },
-    // Lecture simulée : renvoie toujours la même facture d'exemple.
-    async scanInvoice() {
-      await new Promise((r) => setTimeout(r, 1200));
-      return {
-        shop: "LEGO Store Bruxelles", date: iso(new Date()), currency: "EUR", shipping: 0,
-        items: [
-          { set_no: "10294-1", name: "LEGO Icons Titanic", qty: 1, unit_price: 566.99, condition: "N" },
-          { set_no: "21318-1", name: "LEGO Ideas Tree House", qty: 2, unit_price: 179.99, condition: "N" },
-        ],
-        warning: "Lecture simulée (mode démo) : la vraie lecture se fait en ligne.",
-      };
-    },
     async lookupSet(setNo) {
       await new Promise((r) => setTimeout(r, 300));
       return setInfo(setNo);
