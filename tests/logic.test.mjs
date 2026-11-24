@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, trend, trends, project, analyze, stats, filterRows, sortRows,
+  manualRow, valueSource, splitSale, trend, trends, project, analyze, stats, filterRows, sortRows,
 } from "../js/invest.js";
 import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
 
@@ -187,6 +187,22 @@ await test("nom choisi prioritaire sur le catalogue, recherche dans les deux", (
   assert.equal(c.name, "");
   assert.deepEqual(filterRows([a, b, c], { q: "millennium" }).map((r) => r.p.id), ["a", "b"]);
   assert.deepEqual(filterRows([a, b, c], { q: "faucon" }).map((r) => r.p.id), ["a"]);
+});
+
+await test("vente d'une partie d'un lot : partage et frais au prorata", () => {
+  const lot = P({ id: "lot", qty: 3, unitPrice: 79.99, fees: 5, date: "2023-11-24", notes: "Bol" });
+  const { kept, sold } = splitSale(lot, 1, 120, "2024-06-01", "new");
+  assert.deepEqual([kept.id, kept.qty, kept.fees, kept.soldPrice], ["lot", 2, 3.33, null]);
+  assert.deepEqual([sold.id, sold.qty, sold.fees, sold.soldPrice, sold.soldDate, sold.unitPrice], ["new", 1, 1.67, 120, "2024-06-01", 79.99]);
+  assert.equal(kept.fees + sold.fees, 5);
+  assert.match(sold.notes, /Bol · Vente partielle : 1 boîte sur 3/);
+  assert.ok(Math.abs(cost(kept) + cost(sold) - cost(lot)) < 1e-9);
+  assert.ok(Math.abs(position(sold, []).gain - (120 - 79.99 - 1.67)) < 1e-9);
+  const all = splitSale(lot, 3, 400, "2024-06-01", "x");
+  assert.equal(all.kept, null);
+  assert.deepEqual([all.sold.id, all.sold.qty, all.sold.soldPrice], ["lot", 3, 400]);
+  assert.throws(() => splitSale(lot, 4, 100, "2024-06-01", "x"), /Nombre/);
+  assert.throws(() => splitSale(lot, 1, 100, "2023-01-01", "x"), /précéder/);
 });
 
 // ---------- BrickLink ----------

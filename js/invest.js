@@ -259,6 +259,23 @@ export function sortRows(rows, key, reverse = false) {
   return reverse ? out.reverse() : out;
 }
 
+// Vente de n boîtes d'un lot. Tout le lot : l'achat est simplement marqué vendu.
+// Une partie : le lot est partagé en deux achats (gardé / vendu), frais d'achat répartis au prorata.
+export function splitSale(p, n, soldPrice, soldDate, newId) {
+  const qty = Number(p.qty) || 0;
+  if (!(Number.isInteger(n) && n >= 1 && n <= qty)) throw new Error("Nombre de boîtes invalide");
+  if (!(soldPrice >= 0)) throw new Error("Prix de vente invalide");
+  if (!soldDate || soldDate < p.date) throw new Error("La vente ne peut pas précéder l'achat");
+  if (n === qty) return { kept: null, sold: { ...p, soldPrice, soldDate } };
+  const fees = Number(p.fees) || 0;
+  const soldFees = Math.round((fees * n / qty) * 100) / 100;
+  return {
+    kept: { ...p, qty: qty - n, fees: Math.round((fees - soldFees) * 100) / 100 },
+    sold: { ...p, id: newId, qty: n, fees: soldFees, soldPrice, soldDate,
+      notes: [p.notes, `Vente partielle : ${n} boîte${n > 1 ? "s" : ""} sur ${qty}`].filter(Boolean).join(" · ") },
+  };
+}
+
 // Export tableur (séparateur « ; » et virgule décimale, comme Excel en Belgique).
 export function toCSV(purchases, prices, sets) {
   const head = ["Set", "Nom", "État", "Quantité", "Prix unitaire", "Frais", "Coût", "Date d'achat", "Boutique",

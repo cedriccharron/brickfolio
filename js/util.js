@@ -54,7 +54,12 @@ export function confirmDialog(message, okLabel = "Confirmer", danger = true) {
         <button value="cancel" class="btn ghost">Annuler</button>
         <button value="ok" class="btn ${danger ? "danger" : "primary"}">${esc(okLabel)}</button>
       </div></form>`;
-    dlg.onclose = () => resolve(dlg.returnValue === "ok");
+    // Réponse à l'envoi du formulaire ; la fermeture (touche Échap) vaut « Annuler ».
+    let done = false;
+    const end = (v) => { if (!done) { done = true; resolve(v); } };
+    dlg.querySelector("form").addEventListener("submit", (e) => end(e.submitter?.value === "ok"));
+    dlg.onclose = () => end(dlg.returnValue === "ok");
+    dlg.returnValue = "";
     dlg.showModal();
   });
 }

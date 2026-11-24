@@ -67,6 +67,13 @@ export async function createSupabaseStore() {
     return data;
   }
 
+  // Fichier de facture supprimé seulement si plus aucun achat n'y renvoie.
+  async function dropFileIfUnused(path) {
+    if (!path) return;
+    const { data } = await sb.from("purchases").select("id").eq("invoice_path", path).limit(1);
+    if (!data?.length) await sb.storage.from(BUCKET).remove([path]);
+  }
+
   return {
     mode: "online",
     async init() {
@@ -115,7 +122,13 @@ export async function createSupabaseStore() {
     },
     async deletePurchase(id) {
       const [row] = must(await sb.from("purchases").delete().eq("id", id).select("invoice_path"));
-      if (row?.invoice_path) await sb.storage.from(BUCKET).remove([row.invoice_path]); // facture supprimée avec l'achat
+      await dropFileIfUnused(row?.invoice_path); // facture supprimée avec l'achat, sauf si un autre achat la partage
+    },
+
+    // Même facture pour un second achat (lot partagé lors d'une vente partielle).
+    async linkInvoice(from, toId) {
+      if (!from.invoicePath) return;
+      must(await sb.from("purchases").update({ invoice_path: from.invoicePath, invoice_name: from.invoiceName, invoice_type: from.invoiceType }).eq("id", toId));
     },
 
     // Facture : un fichier par achat, remplacé si on en joint un nouveau.
@@ -124,14 +137,14 @@ export async function createSupabaseStore() {
       must(await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false }));
       const { error } = await sb.from("purchases").update({ invoice_path: path, invoice_name: file.name, invoice_type: file.type }).eq("id", p.id);
       if (error) { await sb.storage.from(BUCKET).remove([path]); throw new Error(translate(error.message)); }
-      if (p.invoicePath) await sb.storage.from(BUCKET).remove([p.invoicePath]);
+      await dropFileIfUnused(p.invoicePath);
     },
     async invoiceUrl(p) {
       return must(await sb.storage.from(BUCKET).createSignedUrl(p.invoicePath, 600)).signedUrl; // lien valable 10 minutes
     },
     async removeInvoice(p) {
       must(await sb.from("purchases").update({ invoice_path: null, invoice_name: null, invoice_type: null }).eq("id", p.id));
-      await sb.storage.from(BUCKET).remove([p.invoicePath]);
+      await dropFileIfUnused(p.invoicePath);
     },
 
     // Valeur encodée à la main : m = { setNo, condition, on, value, note }

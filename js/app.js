@@ -6,10 +6,10 @@ import { lineChart, sparkline } from "./chart.js";
 import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmount, toast, confirmDialog, download } from "./util.js";
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
-  pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, project,
+  pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, project, splitSale, cost,
 } from "./invest.js";
 
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -335,7 +335,7 @@ function viewDetail(p) {
     ${p.notes ? `<section class="panel"><h2>Notes</h2><p class="notes">${esc(p.notes)}</p></section>` : ""}
     <div class="form-actions">
       <a class="btn ghost" href="${blUrl(p.setNo)}" target="_blank" rel="noopener">${icon("external", 18)} BrickLink</a>
-      ${pos.sold ? "" : `<a class="btn primary" href="#/p/${p.id}/edit?sell">${icon("tag", 18)} Vendu</a>`}
+      ${pos.sold ? "" : `<button class="btn primary" data-action="sell" data-id="${p.id}">${icon("tag", 18)} Vendre${p.qty > 1 ? "…" : ""}</button>`}
     </div>`;
 }
 
@@ -677,6 +677,79 @@ async function refreshPrices(silent = false) {
   }
 }
 
+// ---------- Vente (tout le lot ou une partie) -------------------------------------------
+function sellDialog(p) {
+  const dlg = $("#dialog");
+  if (dlg.open) dlg.close();
+  const qty = Number(p.qty) || 1;
+  const unit = position(p, S.data.prices).unit;
+  dlg.innerHTML = `<form method="dialog" class="dlg" id="sell-form">
+    <h2>Vendre</h2>
+    <p class="muted small">${esc(pName(p))} · ${qty} boîte${qty > 1 ? "s" : ""} achetée${qty > 1 ? "s" : ""} le ${fmtDate(p.date)}${p.shop ? ` (${esc(p.shop)})` : ""}</p>
+    ${qty > 1 ? `<label class="field"><span>Boîtes vendues</span>
+      <div class="stepper"><button type="button" class="btn ghost small" data-step="-1" aria-label="Une de moins">−</button>
+      <input name="n" type="number" min="1" max="${qty}" step="1" value="${qty}" inputmode="numeric" required>
+      <button type="button" class="btn ghost small" data-step="1" aria-label="Une de plus">+</button><span class="muted small">sur ${qty}</span></div></label>` : ""}
+    <label class="field"><span>Prix de vente total, net (€)</span><input name="price" inputmode="decimal" placeholder="0,00" required autofocus>
+      <span class="hint">Pour les boîtes vendues, après frais d'envoi et commissions.</span></label>
+    <label class="field"><span>Date de vente</span><input name="on" type="date" value="${todayIso()}" min="${esc(p.date)}" max="${todayIso()}" required></label>
+    <div class="sell-preview" id="sell-preview"></div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost" formnovalidate>Annuler</button>
+      <button value="ok" class="btn primary">Enregistrer la vente</button>
+    </div></form>`;
+  const form = $("#sell-form");
+  const read = () => {
+    const fd = new FormData(form);
+    return { n: qty > 1 ? Number(fd.get("n")) : 1, price: parseAmount(fd.get("price")), on: fd.get("on") };
+  };
+  // Aperçu : coût de ces boîtes (frais au prorata), valeur estimée, bénéfice
+  const preview = () => {
+    const { n, price } = read();
+    if (!(n >= 1 && n <= qty)) { $("#sell-preview").innerHTML = `<p class="warn small">Entre 1 et ${qty} boîtes.</p>`; return; }
+    const c = cost({ ...p, qty: n, fees: (Number(p.fees) || 0) * n / qty });
+    const est = unit != null ? unit * n : null;
+    const gain = price != null && !Number.isNaN(price) ? price - c : null;
+    $("#sell-preview").innerHTML = `<div class="kpis">
+      <div><span>Coût de ${n > 1 ? "ces boîtes" : "cette boîte"}</span><strong>${fmtEur(c, 2)}</strong></div>
+      <div><span>Bénéfice</span><strong class="${tone(gain)}">${gain == null ? "—" : fmtSigned(gain, 2)}</strong><em>${gain == null ? "" : fmtPct(c ? gain / c : null)}</em></div>
+    </div>
+    ${est != null ? `<p class="muted small">Valeur actuelle estimée : ${fmtEur(est)}${n > 1 ? ` (${fmtEur(unit)} la boîte)` : ""}.</p>` : ""}
+    ${qty > 1 && n < qty ? `<p class="muted small">Le lot sera partagé : ${qty - n} boîte${qty - n > 1 ? "s restent" : " reste"} en stock, ${n} passe${n > 1 ? "nt" : ""} en « Vendus ».${p.invoicePath ? " La facture reste jointe aux deux." : ""}</p>` : ""}`;
+  };
+  form.addEventListener("input", preview);
+  form.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-step]");
+    if (!b) return;
+    const inp = form.elements.n;
+    inp.value = Math.min(qty, Math.max(1, (Number(inp.value) || 1) + Number(b.dataset.step)));
+    preview();
+  });
+  preview();
+  dlg.onclose = null;
+  // À l'envoi du formulaire (plus sûr que l'événement de fermeture de la fenêtre)
+  form.addEventListener("submit", async (e) => {
+    if (e.submitter?.value !== "ok") return;
+    const { n, price, on } = read();
+    let parts;
+    try { parts = splitSale(p, n, price ?? NaN, on, uuid()); } catch (e) { return toast(e.message, "error"); }
+    const { kept, sold } = parts;
+    try {
+      await S.store.savePurchase(sold); // d'abord la vente…
+      if (kept) {
+        try { await S.store.savePurchase(kept); } // …puis le lot réduit ; en cas d'échec, on annule la vente
+        catch (e) { await S.store.deletePurchase(sold.id).catch(() => {}); throw e; }
+        if (p.invoicePath) await S.store.linkInvoice(p, sold.id).catch(() => toast("Vente enregistrée, mais la facture n'a pas été recopiée", "error"));
+      }
+      await reload();
+      go(`#/p/${kept ? p.id : sold.id}`);
+      toast(kept ? `Vente de ${n} boîte${n > 1 ? "s" : ""} enregistrée · ${kept.qty} en stock` : "Vente enregistrée");
+    } catch (e) { toast(e.message, "error"); }
+  });
+  dlg.returnValue = "";
+  dlg.showModal();
+}
+
 // ---------- Valeur manuelle ---------------------------------------------------------
 function manualDialog(p) {
   const dlg = $("#dialog");
@@ -692,8 +765,9 @@ function manualDialog(p) {
       <button value="cancel" class="btn ghost" formnovalidate>Annuler</button>
       <button value="ok" class="btn primary">Enregistrer</button>
     </div></form>`;
-  dlg.onclose = async () => {
-    if (dlg.returnValue !== "ok") return;
+  dlg.onclose = null;
+  $("#manual-form").addEventListener("submit", async (e) => {
+    if (e.submitter?.value !== "ok") return;
     const fd = new FormData($("#manual-form"));
     const value = parseAmount(fd.get("value"));
     if (value == null || Number.isNaN(value) || value < 0) return toast("Valeur invalide", "error");
@@ -702,7 +776,7 @@ function manualDialog(p) {
       await reload();
       toast("Valeur enregistrée");
     } catch (e) { toast(e.message, "error"); }
-  };
+  });
   dlg.returnValue = "";
   dlg.showModal();
 }
@@ -719,6 +793,7 @@ document.addEventListener("click", async (e) => {
   else if (a === "refresh") refreshPrices();
   else if (a === "lookup") lookup();
   else if (a === "manual") manualDialog(purchase(el.dataset.id));
+  else if (a === "sell") sellDialog(purchase(el.dataset.id));
   else if (a === "del-manual") {
     if (!(await confirmDialog("Supprimer cette valeur encodée ?", "Supprimer"))) return;
     try { await S.store.deleteManualValue(el.dataset.id); await reload(); toast("Valeur supprimée"); }

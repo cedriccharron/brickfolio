@@ -123,6 +123,14 @@ export function createDemoStore() {
       Object.assign(x, { invoicePath: p.id, invoiceName: file.name, invoiceType: file.type });
       write(d);
     },
+    async linkInvoice(from, toId) {
+      const inv = readInvoices();
+      if (!inv[from.id]) return;
+      inv[toId] = inv[from.id]; writeInvoices(inv);
+      const d = read();
+      Object.assign(d.purchases.find((y) => y.id === toId), { invoicePath: toId, invoiceName: from.invoiceName, invoiceType: from.invoiceType });
+      write(d);
+    },
     async invoiceUrl(p) {
       const data = readInvoices()[p.id];
       if (!data) throw new Error("Facture introuvable");
