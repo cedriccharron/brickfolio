@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -22,6 +22,7 @@ const S = {
   filter: "held",   // held | sold | all
   sort: localStorage.getItem("brickfolio-sort") || "gain",
   draft: null,      // brouillon du formulaire d'achat
+  scan: null,       // dernière facture lue : { file, invoice, used: Set des lignes déjà enregistrées }
   busy: false,      // relevé des prix en cours
 };
 
@@ -258,8 +259,8 @@ function invoicePanel(p) {
 
 async function attachInvoice(p, file) {
   if (!file) return;
-  const type = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : "");
-  if (!INVOICE_TYPES.includes(type)) return toast("Choisis un PDF ou une photo (JPEG, PNG, HEIC)", "error");
+  const type = invoiceType(file);
+  if (!type) return toast("Choisis un PDF ou une photo (JPEG, PNG, HEIC)", "error");
   if (file.size > INVOICE_MAX) return toast("Fichier trop lourd : 10 Mo au plus", "error");
   toast("Envoi de la facture…");
   try {
@@ -293,13 +294,13 @@ async function viewInvoice(p) {
 function viewForm(p) {
   const selling = location.hash.includes("?sell");
   if (!S.draft || S.draft.id !== (p?.id || "new")) {
-    S.draft = p ? { ...p, id: p.id, found: setOf(p.setNo), sold: isSold(p) || selling }
-      : { id: "new", setNo: "", condition: "N", qty: 1, unitPrice: "", fees: "", date: todayIso(), shop: "", notes: "", soldPrice: null, soldDate: null, found: null, sold: false };
+    S.draft = p ? { ...p, id: p.id, found: setOf(p.setNo), sold: isSold(p) || selling } : newDraft();
   }
   const d = S.draft;
   const v = (x) => (x == null ? "" : esc(String(x).replace(".", ",")));
   return `${top(p ? "Modifier l'achat" : "Nouvel achat", { back: p ? `#/p/${p.id}` : "#/" })}
     <form id="purchase-form" class="pad" autocomplete="off">
+      ${p ? "" : invoiceBox(d)}
       <label class="field"><span>Numéro du set</span>
         <div class="inline-form">
           <input name="setNo" value="${esc(d.setNo)}" placeholder="ex. 75192" inputmode="text" required ${p ? "readonly" : ""}>
@@ -332,6 +333,119 @@ function viewForm(p) {
         <button class="btn primary">Enregistrer</button>
       </div>
     </form>`;
+}
+
+const newDraft = () => ({ id: "new", setNo: "", condition: "N", qty: 1, unitPrice: "", fees: "", date: todayIso(), shop: "", notes: "",
+  soldPrice: null, soldDate: null, found: null, sold: false, invoiceFile: null, scanning: false, scanItem: null });
+
+// Encart « Facture » du nouvel achat : lecture par Claude, ou simple pièce jointe.
+function invoiceBox(d) {
+  const input = (action) => `<input type="file" accept="application/pdf,image/*" data-action="${action}" hidden>`;
+  if (!d.invoiceFile) {
+    return `<div class="scan-box">
+      <div class="scan-actions">
+        <label class="btn primary small">${icon("scan", 16)} Lire une facture${input("scan-file")}</label>
+        <label class="btn ghost small">${icon("clip", 16)} Joindre sans lire${input("attach-file")}</label>
+      </div>
+      <p class="hint">« Lire » remplit le formulaire à partir du PDF ou de la photo de la facture ; vérifie avant d'enregistrer. Dans les deux cas, la facture est jointe à l'achat.</p>
+    </div>`;
+  }
+  const sc = S.scan?.file === d.invoiceFile ? S.scan : null;
+  const inv = sc?.invoice;
+  const isPdf = d.invoiceFile.type === "application/pdf";
+  const status = d.scanning ? `<span class="muted small">Lecture en cours…</span>`
+    : inv ? `<span class="small up">Lue : vérifie les champs ci-dessous</span>` : `<span class="muted small">Jointe sans lecture</span>`;
+  const notes = [];
+  if (inv?.warning) notes.push(esc(inv.warning));
+  if (inv?.currency && inv.currency !== "EUR") notes.push(`Montants en ${esc(inv.currency)} : convertis-les en euros.`);
+  if (inv && !inv.items.length) notes.push("Aucun set LEGO reconnu : complète le formulaire à la main.");
+  return `<div class="scan-box">
+    <div class="scan-file">
+      <span class="invoice-ic">${icon(isPdf ? "file" : "photo", 22)}</span>
+      <span class="grow"><strong>${esc(d.invoiceFile.name)}</strong>${status}</span>
+      ${d.scanning ? "" : `<button type="button" class="icon-btn mini" data-action="draft-file-clear" aria-label="Retirer la facture">${icon("trash", 16)}</button>`}
+    </div>
+    ${notes.map((t) => `<p class="warn small">${t}</p>`).join("")}
+    ${inv?.items.length > 1 ? `<p class="small scan-title">${inv.items.length} sets sur cette facture : choisis celui à enregistrer.</p>
+      <div class="scan-items">${inv.items.map((it, i) => `<button type="button" class="scan-item ${d.scanItem === i ? "on" : ""} ${sc.used.has(i) ? "done" : ""}" data-action="scan-item" data-i="${i}">
+        <strong>${esc(it.name || it.set_no || "Set")}</strong>
+        <span class="muted small">${esc(it.set_no || "n° ?")} · ×${it.qty} · ${it.unit_price != null ? fmtEur(it.unit_price, 2) : "prix ?"}${sc.used.has(i) ? " · déjà enregistré" : ""}</span>
+      </button>`).join("")}</div>` : ""}
+  </div>`;
+}
+
+const invoiceType = (file) => {
+  const type = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : /\.(heic|heif)$/i.test(file.name) ? "image/heic" : "");
+  return INVOICE_TYPES.includes(type) ? type : null;
+};
+const toBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(",")[1]);
+  r.onerror = () => reject(new Error("Fichier illisible"));
+  r.readAsDataURL(blob);
+});
+
+// Ce qui part à la lecture : le PDF tel quel, une photo réduite à 2000 px en JPEG (plus rapide, et le HEIC de l'iPhone devient lisible).
+async function scanPayload(file) {
+  if (file.type === "application/pdf") {
+    if (file.size > 8 * 1024 * 1024) throw new Error("PDF trop lourd pour être lu (8 Mo au plus) : joins-le sans lecture");
+    return { mediaType: "application/pdf", data: await toBase64(file) };
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = url; });
+    const k = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
+    if (!blob) throw new Error();
+    return { mediaType: "image/jpeg", data: await toBase64(blob) };
+  } catch {
+    throw new Error("Photo illisible par le navigateur : fais une capture d'écran de la facture, ou joins-la sans lecture");
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// Remplit le brouillon avec l'en-tête de la facture et la ligne i.
+function applyScan(i) {
+  const { invoice, used } = S.scan;
+  const d = S.draft;
+  if (invoice.date && invoice.date <= todayIso()) d.date = invoice.date;
+  if (invoice.shop) d.shop = invoice.shop;
+  d.fees = used.size === 0 && invoice.shipping ? invoice.shipping : ""; // frais de port comptés une seule fois
+  const it = invoice.items[i];
+  d.scanItem = it ? i : null;
+  if (!it) return;
+  Object.assign(d, { setNo: it.set_no || "", qty: it.qty, unitPrice: it.unit_price ?? "", found: it.set_no ? S.data.sets[it.set_no] || null : null, lookedUp: false });
+  if (it.condition) d.condition = it.condition;
+}
+
+async function pickInvoice(file, read) {
+  if (!file) return;
+  readForm();
+  const type = invoiceType(file);
+  if (!type) return toast("Choisis un PDF ou une photo (JPEG, PNG, HEIC)", "error");
+  if (file.size > INVOICE_MAX) return toast("Fichier trop lourd : 10 Mo au plus", "error");
+  const draft = S.draft;
+  draft.invoiceFile = type === file.type ? file : new File([file], file.name, { type });
+  draft.scanItem = null;
+  if (!read) { render(); return; }
+  draft.scanning = true;
+  render();
+  try {
+    const invoice = await S.store.scanInvoice(await scanPayload(draft.invoiceFile));
+    S.scan = { file: draft.invoiceFile, invoice, used: new Set() };
+    draft.scanning = false;
+    if (S.draft !== draft) return; // formulaire quitté entre-temps
+    applyScan(0);
+    render();
+    if (draft.setNo && !draft.found) lookup();
+  } catch (e) {
+    draft.scanning = false;
+    toast(e.message, "error");
+    if (S.draft === draft) render();
+  }
 }
 
 // Recopie le formulaire dans le brouillon (avant de redessiner).
@@ -385,10 +499,28 @@ async function savePurchase() {
     if (!S.data.sets[setNo]) { try { await S.store.lookupSet(setNo); } catch { /* fiche plus tard */ } }
     await S.store.savePurchase(p);
   } catch (e) { return toast(e.message, "error"); }
+  const file = d.invoiceFile;
+  let saved = "Achat enregistré";
+  if (file) {
+    try { await S.store.attachInvoice(p, file); saved = "Achat enregistré avec sa facture"; }
+    catch (e) { toast(`Achat enregistré, mais la facture n'a pas pu être jointe : ${e.message}`, "error"); saved = null; }
+  }
+  const sc = S.scan?.file === file && file ? S.scan : null;
+  if (sc && d.scanItem != null) sc.used.add(d.scanItem);
   S.draft = null;
   await reload();
+  const next = sc ? sc.invoice.items.findIndex((_, i) => !sc.used.has(i)) : -1;
+  const left = sc ? sc.invoice.items.length - sc.used.size : 0;
+  if (next >= 0 && await confirmDialog(`${saved || "Achat enregistré"}. Il reste ${left} set(s) sur cette facture : les encoder maintenant ?`, "Continuer", false)) {
+    S.draft = { ...newDraft(), invoiceFile: file };
+    applyScan(next);
+    go("#/p/new");
+    render();
+    if (S.draft.setNo && !S.draft.found) lookup();
+    return;
+  }
   go(`#/p/${p.id}`);
-  toast("Achat enregistré");
+  if (saved) toast(saved);
   // Premier achat de ce set dans cet état : on relève son prix sans attendre lundi.
   if (isNewPair && !p.soldPrice && S.store.mode === "online") refreshPrices(true);
 }
@@ -486,6 +618,8 @@ document.addEventListener("click", async (e) => {
     try { await S.store.removeInvoice(purchase(el.dataset.id)); await reload(); toast("Facture supprimée"); }
     catch (err) { toast(err.message, "error"); }
   }
+  else if (a === "scan-item") { readForm(); applyScan(Number(el.dataset.i)); render(); if (S.draft.setNo && !S.draft.found) lookup(); }
+  else if (a === "draft-file-clear") { readForm(); Object.assign(S.draft, { invoiceFile: null, scanItem: null }); render(); }
   else if (a === "toggle-sold") $("#sold-fields").classList.toggle("hidden", !el.checked);
   else if (a === "delete") {
     if (!(await confirmDialog("Supprimer cet achat, son historique et sa facture ?", "Supprimer"))) return;
@@ -506,6 +640,9 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  if (e.target.dataset.action === "scan-file" || e.target.dataset.action === "attach-file") {
+    pickInvoice(e.target.files[0], e.target.dataset.action === "scan-file"); return;
+  }
   if (e.target.dataset.action === "invoice-file") { attachInvoice(purchase(e.target.dataset.id), e.target.files[0]); e.target.value = ""; return; }
   if (e.target.dataset.action === "sort") {
     S.sort = e.target.value;

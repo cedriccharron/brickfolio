@@ -3,6 +3,8 @@
 //
 //  POST {"action":"lookup","set_no":"75192-1"}  → fiche du set (nom, année, image), mise en cache dans « sets ».
 //  POST {"action":"refresh"}                    → relève les prix de tous les sets détenus, écrit dans « prices ».
+//  POST {"action":"invoice","media_type":"application/pdf","data":"<base64>"}
+//                                               → lit une facture avec Claude : vendeur, date, sets, prix (rien n'est enregistré).
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
 // planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
@@ -10,8 +12,11 @@
 //
 // Secrets (Edge Functions > Secrets) : BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET,
 // BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
+// Lecture des factures : ANTHROPIC_API_KEY (console.anthropic.com).
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk";
 import { blGet, parseItem, priceGuide } from "./bricklink.js";
+import { INVOICE_MAX_BYTES, INVOICE_TYPES, invoiceRequest, parseInvoice } from "./facture.js";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const keys = {
@@ -67,6 +72,25 @@ async function lookup(setNo: string) {
   }
 }
 
+// Facture → { shop, date, currency, shipping, items: [{ set_no, name, qty, unit_price, condition }], warning }
+async function readInvoice(mediaType: string, data: string) {
+  const apiKey = env("ANTHROPIC_API_KEY");
+  if (!apiKey) return json({ error: "Clé Anthropic absente : ajoute ANTHROPIC_API_KEY dans Edge Functions > Secrets" }, 503);
+  if (!INVOICE_TYPES.includes(mediaType)) return json({ error: "Format non lisible : envoie un PDF ou une photo JPEG / PNG" }, 400);
+  if (!data || data.length > INVOICE_MAX_BYTES * 1.37) return json({ error: "Fichier trop lourd pour être lu (8 Mo au plus)" }, 413);
+  const client = new Anthropic({ apiKey, timeout: 100_000, maxRetries: 1 });
+  try {
+    const response = await client.beta.messages.create(invoiceRequest(mediaType, data));
+    return json({ invoice: parseInvoice(response) });
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) return json({ error: "Clé Anthropic refusée : vérifie ANTHROPIC_API_KEY" }, 502);
+    if (e instanceof Anthropic.RateLimitError) return json({ error: "Trop de lectures d'un coup, réessaie dans une minute" }, 429);
+    if (e instanceof Anthropic.BadRequestError) return json({ error: `Facture refusée par Claude : ${e.message}` }, 400);
+    if (e instanceof Anthropic.APIError) return json({ error: `Service de lecture indisponible (${e.status ?? "réseau"})` }, 502);
+    return json({ error: (e as Error).message }, 500);
+  }
+}
+
 async function refresh() {
   const started = Date.now();
   const { data: run } = await admin.from("runs").insert({ started_at: new Date().toISOString() }).select("id").single();
@@ -113,10 +137,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
   if (!(await isCron(req)) && !(await isOwner(req))) return json({ error: "Accès refusé" }, 403);
-  if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
 
   try {
     const body = await req.json().catch(() => ({}));
+    if (body.action === "invoice") {
+      if (await isCron(req)) return json({ error: "Accès refusé" }, 403);
+      return await readInvoice(String(body.media_type || ""), String(body.data || ""));
+    }
+    if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
     if (body.action === "lookup") {
       const setNo = String(body.set_no || "").trim().toUpperCase();
       if (!/^[0-9A-Z]+(-\d+)?$/.test(setNo)) return json({ error: "Numéro de set invalide" }, 400);

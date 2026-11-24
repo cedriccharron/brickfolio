@@ -4,6 +4,7 @@ import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
   manualRow, valueSource,
 } from "../js/invest.js";
+import { invoiceRequest, parseInvoice, INVOICE_SCHEMA } from "../supabase/functions/bricklink/facture.js";
 import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
 
 let n = 0;
@@ -146,6 +147,39 @@ await test("appel BrickLink simulé (URL, en-tête, erreurs)", async () => {
   assert.ok(calls[0].auth.startsWith("OAuth ") && calls[0].auth.includes("oauth_signature="));
   const denied = async () => ({ status: 200, json: async () => ({ meta: { code: 401, description: "TOKEN_IP_MISMATCHED" } }) });
   await assert.rejects(priceGuide("10294-1", "N", keys, { fetchFn: denied }), /TOKEN_IP_MISMATCHED/);
+});
+
+// ---------- Lecture de facture ----------
+await test("demande de lecture : PDF en document, photo en image, format imposé", () => {
+  const pdf = invoiceRequest("application/pdf", "QUJD");
+  assert.equal(pdf.messages[0].content[0].type, "document");
+  assert.equal(pdf.messages[0].content[0].source.data, "QUJD");
+  assert.equal(invoiceRequest("image/jpeg", "x").messages[0].content[0].type, "image");
+  assert.equal(pdf.output_config.format.type, "json_schema");
+  assert.equal(pdf.fallbacks, "default");
+  // Toutes les propriétés de chaque objet sont requises et aucune autre n'est permise.
+  const check = (o) => {
+    if (o.type === "object") { assert.equal(o.additionalProperties, false); assert.deepEqual([...o.required].sort(), Object.keys(o.properties).sort()); Object.values(o.properties).forEach(check); }
+    if (o.type === "array") check(o.items);
+    (o.anyOf || []).forEach(check);
+  };
+  check(INVOICE_SCHEMA);
+});
+
+await test("réponse de lecture nettoyée", () => {
+  const r = parseInvoice({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({
+    shop: " Fnac ", date: "2023-03-14", currency: "eur", shipping: 4.999,
+    items: [{ set_no: "10294", name: "LEGO Titanic", qty: 2, unit_price: 539.994, condition: "N" },
+            { set_no: "n/a ?", name: "Sac", qty: 0, unit_price: -1, condition: "X" }],
+    warning: null }) }] });
+  assert.equal(r.shop, "Fnac");
+  assert.equal(r.currency, "EUR");
+  assert.equal(r.shipping, 5);
+  assert.deepEqual(r.items[0], { set_no: "10294-1", name: "LEGO Titanic", qty: 2, unit_price: 539.99, condition: "N" });
+  assert.deepEqual(r.items[1], { set_no: null, name: "Sac", qty: 1, unit_price: null, condition: null });
+  assert.equal(parseInvoice({ stop_reason: "end_turn", content: [{ type: "text", text: '{"date":"14/03/2023","items":[]}' }] }).date, null);
+  assert.throws(() => parseInvoice({ stop_reason: "refusal", content: [] }), /refusée/);
+  assert.throws(() => parseInvoice({ stop_reason: "end_turn", content: [{ type: "text", text: "pas du json" }] }), /illisible/);
 });
 
 console.log(`\n${n} tests réussis`);

@@ -8,7 +8,7 @@ Suivi d'investissement LEGO : achats, valeur BrickLink relevée chaque semaine, 
 - Deux stockages à interface identique : `js/store-demo.js` (navigateur, prix simulés) et `js/store-supabase.js`. `?demo` dans l'URL force le mode démo.
 - Calculs purs et testés : `js/invest.js`. Courbes SVG : `js/chart.js`.
 - Base : `supabase/schema.sql` (RLS, `is_owner()` sur la table `owners`). Les prix et les fiches de sets ne sont écrits que par la fonction `supabase/functions/bricklink` (clé service).
-- Fonction `bricklink` : `lookup` (fiche du set) et `refresh` (relevé des prix). Signature OAuth 1.0 dans `bricklink.js`, partagé avec les tests Node. Déployée sans vérification JWT ; l'accès est contrôlé dans la fonction (compte `owners`, ou en-tête `x-cron-secret` comparé au secret du Vault par `public.brickfolio_cron_ok`, réservée à service_role). Déploiement depuis l'éditeur Supabase : coller `supabase/bricklink-editeur.ts` (généré par `node tests/build-function.mjs`).
+- Fonction `bricklink` : `lookup` (fiche du set), `refresh` (relevé des prix) et `invoice` (lecture de facture). Signature OAuth 1.0 dans `bricklink.js`, partagé avec les tests Node. Déployée sans vérification JWT ; l'accès est contrôlé dans la fonction (compte `owners`, ou en-tête `x-cron-secret` comparé au secret du Vault par `public.brickfolio_cron_ok`, réservée à service_role). Déploiement depuis l'éditeur Supabase : coller `supabase/bricklink-editeur.ts` (généré par `node tests/build-function.mjs`).
 - Relevé planifié : `supabase/cron.sql` (pg_cron + pg_net, lundi 5 h UTC, secret dans Vault `brickfolio_cron_secret`).
 - Projet Supabase partagé avec Cap'taine (`zzhzdiuoonhvxndmziju`, plan gratuit limité à 2 projets) : ne pas réutiliser les noms owners, purchases, sets, prices, manual_values, runs, is_owner, touch, brickfolio_cron_ok, ni le bucket Storage `brickfolio-factures` (politique `brickfolio_factures_rw`).
 
@@ -18,6 +18,7 @@ Suivi d'investissement LEGO : achats, valeur BrickLink relevée chaque semaine, 
 - Valeur d'un set sans prix = son coût. Rendement annualisé affiché seulement après 182 jours.
 - Prix de vente saisi en net (total du lot), frais d'achat inclus dans le coût.
 - Factures (v0.3) : un fichier par achat (PDF ou photo, 10 Mo max) dans le bucket privé `brickfolio-factures`, chemin `<uid>/<id achat>/<horodatage>-<nom>` ; colonnes `invoice_path/name/type` sur `purchases`. Ouverture par lien signé de 10 min. En démo : data URL dans `brickfolio-demo-factures` (3 Mo max).
+- Lecture de facture (v0.4) : action `invoice` de la fonction `bricklink` (comptes `owners` seulement, pas le cron) → Claude `claude-opus-5-5`, effort low, sortie JSON imposée (`output_config.format`), `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Consigne, schéma et nettoyage dans `supabase/functions/bricklink/facture.js` (testés). Secret `ANTHROPIC_API_KEY`. Le client envoie le PDF tel quel (8 Mo max) ou la photo réduite à 2000 px en JPEG ; rien n'est enregistré côté serveur. Frais de port affectés au premier set enregistré de la facture.
 - Images : BrickLink, repli sur Brickset (`images.brickset.com/sets/images/<no>.jpg`).
 
 ## Tests
