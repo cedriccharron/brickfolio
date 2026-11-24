@@ -12,6 +12,13 @@ create schema auth; create table auth.users (id uuid primary key, email text);
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid $$;
 create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true),''),'{}')::jsonb $$;
 grant usage on schema auth to authenticated; grant execute on all functions in schema auth to authenticated;
+-- Stockage de fichiers (simplifié) : buckets, objets avec RLS, storage.foldername().
+create schema storage;
+create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets, name text, owner uuid default auth.uid());
+alter table storage.objects enable row level security;
+create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+grant usage on schema storage to authenticated; grant all on all tables in schema storage to authenticated; grant execute on all functions in schema storage to authenticated;
 insert into auth.users values
   ('00000000-0000-0000-0000-00000000000a', 'cedric@test.be'),
   ('00000000-0000-0000-0000-00000000000b', 'partenaire@test.be'),
@@ -61,5 +68,15 @@ assert.equal((await as("b", `select count(*)::int c from manual_values`))[0].c, 
 assert.equal((await as("b", `delete from manual_values returning id`)).length, 0); ok("ni supprimable par lui");
 await assert.rejects(as("c", `insert into manual_values (set_no, unit_value) values ('1-1', 1)`), /row-level security/); ok("refusée à un compte non autorisé");
 assert.equal((await as("a", `delete from manual_values returning id`)).length, 1); ok("supprimable par son auteur");
+
+// Factures : bucket privé, dossier par compte.
+const A = "00000000-0000-0000-0000-00000000000a";
+assert.equal((await db.query(`select public from storage.buckets where id = 'brickfolio-factures'`)).rows[0].public, false); ok("bucket des factures privé");
+await as("a", `insert into storage.objects (bucket_id, name) values ('brickfolio-factures', '${A}/${id}/facture.pdf')`); ok("facture déposée dans son dossier");
+await as("a", `update purchases set invoice_path = '${A}/${id}/facture.pdf', invoice_name = 'facture.pdf', invoice_type = 'application/pdf' where id = '${id}'`);
+assert.equal((await as("b", `select count(*)::int c from storage.objects`))[0].c, 0); ok("facture invisible pour l'autre compte");
+await assert.rejects(as("b", `insert into storage.objects (bucket_id, name) values ('brickfolio-factures', '${A}/x/pirate.pdf')`), /row-level security/); ok("impossible de déposer dans le dossier d'un autre");
+await assert.rejects(as("c", `insert into storage.objects (bucket_id, name) values ('brickfolio-factures', '00000000-0000-0000-0000-00000000000c/x/f.pdf')`), /row-level security/); ok("refusé à un compte non autorisé");
+assert.equal((await as("a", `delete from storage.objects returning id`)).length, 1); ok("facture supprimable par son auteur");
 
 console.log(`\n${n} vérifications réussies`);

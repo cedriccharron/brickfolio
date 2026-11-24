@@ -9,7 +9,10 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
+// Factures acceptées : PDF ou photo, 10 Mo au plus.
+const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+const INVOICE_MAX = 10 * 1024 * 1024;
 const $ = (s, root = document) => root.querySelector(s);
 const inFrame = () => { try { return window.self !== window.top; } catch { return true; } };
 
@@ -225,11 +228,65 @@ function viewDetail(p) {
           <td>${r.manual ? `<button class="icon-btn mini" data-action="del-manual" data-id="${esc(r.id)}" aria-label="Supprimer cette valeur">${icon("trash", 16)}</button>` : ""}</td></tr>`).join("")}
       </tbody></table>` : `<p class="muted small">Aucune valeur pour l'instant. Encode ta propre estimation (BrickEconomy, 2ememain, Vinted…) en attendant le relevé BrickLink.</p>`}
     </section>
+    ${invoicePanel(p)}
     ${p.notes ? `<section class="panel"><h2>Notes</h2><p class="notes">${esc(p.notes)}</p></section>` : ""}
     <div class="form-actions">
       <a class="btn ghost" href="${blUrl(p.setNo)}" target="_blank" rel="noopener">${icon("external", 18)} BrickLink</a>
       ${pos.sold ? "" : `<a class="btn primary" href="#/p/${p.id}/edit?sell">${icon("tag", 18)} Vendu</a>`}
     </div>`;
+}
+
+function invoicePanel(p) {
+  const pick = (label, cls) => `<label class="btn ${cls} small">${icon("clip", 16)} ${label}
+    <input type="file" accept="application/pdf,image/*" data-action="invoice-file" data-id="${p.id}" hidden></label>`;
+  if (!p.invoicePath) {
+    return `<section class="panel">
+      <div class="panel-head"><h2>Facture</h2>${pick("Joindre", "ghost")}</div>
+      <p class="muted small">Garde la preuve d'achat avec le set : un PDF ou une photo du ticket (10 Mo au plus).</p>
+    </section>`;
+  }
+  const isPdf = p.invoiceType === "application/pdf";
+  return `<section class="panel">
+    <div class="panel-head"><h2>Facture</h2><span class="invoice-tools">${pick("Remplacer", "ghost")}
+      <button class="icon-btn mini" data-action="invoice-del" data-id="${p.id}" aria-label="Supprimer la facture">${icon("trash", 16)}</button></span></div>
+    <button class="invoice-open" data-action="invoice-view" data-id="${p.id}">
+      <span class="invoice-ic">${icon(isPdf ? "file" : "photo", 24)}</span>
+      <span class="grow"><strong>${esc(p.invoiceName || "Facture")}</strong><span class="muted small">${isPdf ? "PDF" : "Photo"} · toucher pour ouvrir</span></span>
+    </button>
+  </section>`;
+}
+
+async function attachInvoice(p, file) {
+  if (!file) return;
+  const type = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : "");
+  if (!INVOICE_TYPES.includes(type)) return toast("Choisis un PDF ou une photo (JPEG, PNG, HEIC)", "error");
+  if (file.size > INVOICE_MAX) return toast("Fichier trop lourd : 10 Mo au plus", "error");
+  toast("Envoi de la facture…");
+  try {
+    await S.store.attachInvoice(p, type === file.type ? file : new File([file], file.name, { type }));
+    await reload();
+    toast(p.invoicePath ? "Facture remplacée" : "Facture jointe");
+  } catch (e) { toast(e.message, "error"); }
+}
+
+// Aperçu dans une fenêtre : la photo s'affiche, le PDF s'ouvre d'un toucher (lien direct, jamais bloqué).
+async function viewInvoice(p) {
+  let url;
+  try { url = await S.store.invoiceUrl(p); } catch (e) { return toast(e.message, "error"); }
+  const dlg = $("#dialog");
+  if (dlg.open) dlg.close();
+  const isPdf = p.invoiceType === "application/pdf";
+  dlg.innerHTML = `<form method="dialog" class="dlg">
+    <h2>Facture</h2>
+    <p class="muted small">${esc(nameOf(p.setNo))} · ${esc(p.invoiceName || "")}</p>
+    ${isPdf ? `<div class="invoice-pdf">${icon("file", 48)}</div>` : `<img class="invoice-img" src="${esc(url)}" alt="Facture">`}
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Fermer</button>
+      <a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener">${icon("external", 18)} Ouvrir</a>
+    </div></form>`;
+  dlg.onclose = () => { if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 60000); };
+  dlg.returnValue = "";
+  dlg.showModal();
 }
 
 // ---------- Formulaire d'achat ---------------------------------------------------
@@ -423,9 +480,15 @@ document.addEventListener("click", async (e) => {
     try { await S.store.deleteManualValue(el.dataset.id); await reload(); toast("Valeur supprimée"); }
     catch (err) { toast(err.message, "error"); }
   }
+  else if (a === "invoice-view") viewInvoice(purchase(el.dataset.id));
+  else if (a === "invoice-del") {
+    if (!(await confirmDialog("Supprimer la facture jointe à cet achat ?", "Supprimer"))) return;
+    try { await S.store.removeInvoice(purchase(el.dataset.id)); await reload(); toast("Facture supprimée"); }
+    catch (err) { toast(err.message, "error"); }
+  }
   else if (a === "toggle-sold") $("#sold-fields").classList.toggle("hidden", !el.checked);
   else if (a === "delete") {
-    if (!(await confirmDialog("Supprimer cet achat et son historique ?", "Supprimer"))) return;
+    if (!(await confirmDialog("Supprimer cet achat, son historique et sa facture ?", "Supprimer"))) return;
     try { await S.store.deletePurchase(el.dataset.id); S.draft = null; await reload(); go("#/"); toast("Achat supprimé"); }
     catch (err) { toast(err.message, "error"); }
   }
@@ -443,6 +506,7 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  if (e.target.dataset.action === "invoice-file") { attachInvoice(purchase(e.target.dataset.id), e.target.files[0]); e.target.value = ""; return; }
   if (e.target.dataset.action === "sort") {
     S.sort = e.target.value;
     try { localStorage.setItem("brickfolio-sort", S.sort); } catch { /* sans importance */ }

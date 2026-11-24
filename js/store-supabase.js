@@ -11,6 +11,7 @@ function loadScript(src) {
   });
 }
 
+const BUCKET = "brickfolio-factures"; // factures (privé, un dossier par compte)
 const CACHE = "brickfolio-cache"; // dernières données connues, pour consulter hors ligne
 const readJSON = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } };
 const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage plein */ } };
@@ -31,7 +32,10 @@ const fromRow = (r) => ({
   id: r.id, setNo: r.set_no, condition: r.condition, qty: r.qty, unitPrice: Number(r.unit_price), fees: Number(r.fees) || 0,
   date: r.bought_on, shop: r.shop || "", notes: r.notes || "",
   soldPrice: r.sold_price == null ? null : Number(r.sold_price), soldDate: r.sold_on || null,
+  invoicePath: r.invoice_path || null, invoiceName: r.invoice_name || null, invoiceType: r.invoice_type || null,
 });
+// Nom de fichier sans accents ni caractères spéciaux (exigé par le stockage).
+const safeName = (name) => (name || "facture").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.-]+/g, "_").slice(-80);
 const n = (v) => (v == null ? null : Number(v));
 const priceFromRow = (r) => ({
   setNo: r.set_no, condition: r.condition, on: r.fetched_on,
@@ -109,7 +113,26 @@ export async function createSupabaseStore() {
       const row = must(await sb.from("purchases").upsert(toRow(p)).select().single());
       return fromRow(row);
     },
-    async deletePurchase(id) { must(await sb.from("purchases").delete().eq("id", id)); },
+    async deletePurchase(id) {
+      const [row] = must(await sb.from("purchases").delete().eq("id", id).select("invoice_path"));
+      if (row?.invoice_path) await sb.storage.from(BUCKET).remove([row.invoice_path]); // facture supprimée avec l'achat
+    },
+
+    // Facture : un fichier par achat, remplacé si on en joint un nouveau.
+    async attachInvoice(p, file) {
+      const path = `${session.user.id}/${p.id}/${Date.now()}-${safeName(file.name)}`;
+      must(await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false }));
+      const { error } = await sb.from("purchases").update({ invoice_path: path, invoice_name: file.name, invoice_type: file.type }).eq("id", p.id);
+      if (error) { await sb.storage.from(BUCKET).remove([path]); throw new Error(translate(error.message)); }
+      if (p.invoicePath) await sb.storage.from(BUCKET).remove([p.invoicePath]);
+    },
+    async invoiceUrl(p) {
+      return must(await sb.storage.from(BUCKET).createSignedUrl(p.invoicePath, 600)).signedUrl; // lien valable 10 minutes
+    },
+    async removeInvoice(p) {
+      must(await sb.from("purchases").update({ invoice_path: null, invoice_name: null, invoice_type: null }).eq("id", p.id));
+      await sb.storage.from(BUCKET).remove([p.invoicePath]);
+    },
 
     // Valeur encodée à la main : m = { setNo, condition, on, value, note }
     async addManualValue(m) {

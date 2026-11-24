@@ -4,6 +4,15 @@ import { uuid } from "./util.js";
 import { manualRow } from "./invest.js";
 
 const KEY = "brickfolio-demo-v1";
+const INVOICES = "brickfolio-demo-factures"; // { id de l'achat: data URL }
+const readInvoices = () => { try { return JSON.parse(localStorage.getItem(INVOICES)) || {}; } catch { return {}; } };
+const writeInvoices = (v) => {
+  try { localStorage.setItem(INVOICES, JSON.stringify(v)); }
+  catch { throw new Error("Fichier trop lourd pour le mode démo (stockage du navigateur plein)"); }
+};
+const asDataUrl = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new Error("Fichier illisible")); r.readAsDataURL(file);
+});
 
 // Petit catalogue pour essayer la recherche sans BrickLink.
 export const DEMO_CATALOG = {
@@ -91,7 +100,7 @@ export function createDemoStore() {
     async savePurchase(p) {
       const d = read();
       const i = d.purchases.findIndex((x) => x.id === p.id);
-      if (i >= 0) d.purchases[i] = p; else d.purchases.unshift(p);
+      if (i >= 0) d.purchases[i] = { ...d.purchases[i], ...p }; else d.purchases.unshift(p);
       if (!d.sets[p.setNo]) d.sets[p.setNo] = setInfo(p.setNo) || { setNo: p.setNo, name: p.setNo, year: null, image: image(p.setNo) };
       // Un set du catalogue démo reçoit tout de suite son historique simulé.
       if (DEMO_CATALOG[p.setNo] && !d.prices.some((r) => r.setNo === p.setNo && r.condition === p.condition && !r.manual)) {
@@ -103,6 +112,26 @@ export function createDemoStore() {
     async deletePurchase(id) {
       const d = read();
       d.purchases = d.purchases.filter((p) => p.id !== id);
+      write(d);
+      const inv = readInvoices(); delete inv[id]; writeInvoices(inv);
+    },
+    async attachInvoice(p, file) {
+      if (file.size > 3 * 1024 * 1024) throw new Error("En mode démo, la facture doit faire moins de 3 Mo");
+      const inv = readInvoices(); inv[p.id] = await asDataUrl(file); writeInvoices(inv);
+      const d = read();
+      const x = d.purchases.find((y) => y.id === p.id);
+      Object.assign(x, { invoicePath: p.id, invoiceName: file.name, invoiceType: file.type });
+      write(d);
+    },
+    async invoiceUrl(p) {
+      const data = readInvoices()[p.id];
+      if (!data) throw new Error("Facture introuvable");
+      return URL.createObjectURL(await (await fetch(data)).blob());
+    },
+    async removeInvoice(p) {
+      const inv = readInvoices(); delete inv[p.id]; writeInvoices(inv);
+      const d = read();
+      Object.assign(d.purchases.find((y) => y.id === p.id), { invoicePath: null, invoiceName: null, invoiceType: null });
       write(d);
     },
     async addManualValue(m) {
@@ -140,6 +169,6 @@ export function createDemoStore() {
       write(d);
       return { ok, failed: 0, total: pairs.length, message: d.lastRun.message };
     },
-    reset() { localStorage.removeItem(KEY); },
+    reset() { localStorage.removeItem(KEY); localStorage.removeItem(INVOICES); },
   };
 }

@@ -121,3 +121,20 @@ create or replace function public.touch() returns trigger language plpgsql as $$
 begin new.updated_at := now(); return new; end $$;
 drop trigger if exists purchases_touch on public.purchases;
 create trigger purchases_touch before update on public.purchases for each row execute function public.touch();
+
+-- ---------- Factures (v0.3) ----------------------------------------------------
+-- Une facture (PDF ou photo) par achat, rangée dans le bucket privé « brickfolio-factures »
+-- sous <id du compte>/<id de l'achat>/<fichier>. Chacun ne voit que les siennes.
+alter table public.purchases add column if not exists invoice_path text;  -- chemin dans le bucket
+alter table public.purchases add column if not exists invoice_name text;  -- nom d'origine du fichier
+alter table public.purchases add column if not exists invoice_type text;  -- type (application/pdf, image/jpeg…)
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('brickfolio-factures', 'brickfolio-factures', false, 10485760,
+        array['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists brickfolio_factures_rw on storage.objects;
+create policy brickfolio_factures_rw on storage.objects for all to authenticated
+  using (bucket_id = 'brickfolio-factures' and (storage.foldername(name))[1] = auth.uid()::text and public.is_owner())
+  with check (bucket_id = 'brickfolio-factures' and (storage.foldername(name))[1] = auth.uid()::text and public.is_owner());

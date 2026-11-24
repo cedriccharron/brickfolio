@@ -10,13 +10,14 @@ Suivi d'investissement LEGO : achats, valeur BrickLink relevée chaque semaine, 
 - Base : `supabase/schema.sql` (RLS, `is_owner()` sur la table `owners`). Les prix et les fiches de sets ne sont écrits que par la fonction `supabase/functions/bricklink` (clé service).
 - Fonction `bricklink` : `lookup` (fiche du set) et `refresh` (relevé des prix). Signature OAuth 1.0 dans `bricklink.js`, partagé avec les tests Node. Déployée sans vérification JWT ; l'accès est contrôlé dans la fonction (compte `owners`, ou en-tête `x-cron-secret` comparé au secret du Vault par `public.brickfolio_cron_ok`, réservée à service_role). Déploiement depuis l'éditeur Supabase : coller `supabase/bricklink-editeur.ts` (généré par `node tests/build-function.mjs`).
 - Relevé planifié : `supabase/cron.sql` (pg_cron + pg_net, lundi 5 h UTC, secret dans Vault `brickfolio_cron_secret`).
-- Projet Supabase partagé avec Cap'taine (`zzhzdiuoonhvxndmziju`, plan gratuit limité à 2 projets) : ne pas réutiliser les noms owners, purchases, sets, prices, manual_values, runs, is_owner, touch, brickfolio_cron_ok.
+- Projet Supabase partagé avec Cap'taine (`zzhzdiuoonhvxndmziju`, plan gratuit limité à 2 projets) : ne pas réutiliser les noms owners, purchases, sets, prices, manual_values, runs, is_owner, touch, brickfolio_cron_ok, ni le bucket Storage `brickfolio-factures` (politique `brickfolio_factures_rw`).
 
 ## Décisions prises
 - Source de prix : BrickLink, guide des prix « vendus » sur 6 mois (moyenne pondérée par quantité, Europe, EUR, TVA comprise), repli sur les annonces en cours. Un relevé par set, état et jour (`unique (set_no, condition, fetched_on)`).
 - Valeurs manuelles (`manual_values`, par compte) fusionnées dans les relevés côté client (`manualRow`, `manual: true`) ; le même jour, la valeur manuelle prime sur BrickLink.
 - Valeur d'un set sans prix = son coût. Rendement annualisé affiché seulement après 182 jours.
 - Prix de vente saisi en net (total du lot), frais d'achat inclus dans le coût.
+- Factures (v0.3) : un fichier par achat (PDF ou photo, 10 Mo max) dans le bucket privé `brickfolio-factures`, chemin `<uid>/<id achat>/<horodatage>-<nom>` ; colonnes `invoice_path/name/type` sur `purchases`. Ouverture par lien signé de 10 min. En démo : data URL dans `brickfolio-demo-factures` (3 Mo max).
 - Images : BrickLink, repli sur Brickset (`images.brickset.com/sets/images/<no>.jpg`).
 
 ## Tests

@@ -219,3 +219,14 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 .hist td { vertical-align: middle; }
 .dlg h2 { margin-bottom: 6px; }
 .dlg .field { margin: 10px 0; }
+
+/* Facture jointe */
+.invoice-tools { display: flex; align-items: center; gap: 4px; }
+.invoice-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; width: calc(100% + 16px); padding: 8px; margin: -4px -8px -8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; border-radius: 10px; cursor: pointer; }
+.invoice-open:hover { background: rgba(34, 50, 74, .06); }
+.invoice-open .grow { min-width: 0; display: flex; flex-direction: column; }
+.invoice-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invoice-ic { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 10px; background: #fff1c7; color: #6b4e00; }
+.invoice-img { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 10px; background: #f3f4f6; margin-bottom: 14px; }
+.invoice-pdf { display: grid; place-items: center; height: 120px; color: var(--hero); margin-bottom: 14px; }
+label.btn { cursor: pointer; }
