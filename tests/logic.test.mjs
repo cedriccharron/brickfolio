@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, splitSale, trend, trends, project, analyze, stats, filterRows, sortRows,
+  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows,
 } from "../js/invest.js";
 import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
 
@@ -105,7 +105,7 @@ await test("valeur manuelle : utilisée si plus récente, prime le même jour", 
 });
 
 // ---------- Tableau de bord : tendances, statistiques, filtres, tris ----------
-await test("tendance sur 3 mois et 1 an, rythme annuel borné", () => {
+await test("tendance passée sur 3 mois et 1 an", () => {
   const prices = [R("2023-06-01", 500), R("2024-03-01", 540), R("2024-06-01", 600)];
   const m3 = trend(prices, "10294-1", "N", 91, "2024-06-10");
   assert.equal(m3.since, "2024-03-01");
@@ -116,11 +116,8 @@ await test("tendance sur 3 mois et 1 an, rythme annuel borné", () => {
   assert.equal(trend(prices, "10294-1", "N", 365 * 3, "2024-06-10"), null); // historique trop court
   assert.equal(trend([R("2024-06-01", 600)], "10294-1", "N", 91, "2024-06-10"), null);
   const t = trends(prices, "10294-1", "N", "2024-06-10");
-  assert.ok(Math.abs(t.rate - 0.2) < 0.01);
-  const wild = trends([R("2024-03-01", 100), R("2024-06-01", 300)], "10294-1", "N", "2024-06-10");
-  assert.equal(wild.rate, 1); // +200 % en 3 mois : plafonné à +100 % / an
-  assert.equal(project(1000, 0.1), 1100);
-  assert.equal(project(null, 0.1), null);
+  assert.deepEqual(Object.keys(t), ["m3", "y1"]); // pas de projection
+  assert.equal(t.y1.since, "2023-06-01");
 });
 
 await test("statistiques : stock, potentiel, tendance, ventes par année", () => {
@@ -150,7 +147,7 @@ await test("statistiques : stock, potentiel, tendance, ventes par année", () =>
   assert.equal(s.sold.profit, 200);
   assert.equal(s.sold.avgDays, 365);
   assert.deepEqual(s.sold.byYear.map((y) => [y.year, y.count, y.profit]), [["2024", 1, 200]]);
-  assert.ok(s.held.projected > s.held.value); // tendance globale en hausse
+  assert.equal(s.held.projected, undefined);
 });
 
 await test("filtres et tris du tableau de bord", () => {

@@ -146,28 +146,18 @@ export function trend(prices, setNo, condition, days, now = today()) {
   return { from: a, to: b, since: first.on, days: span, pct: b / a - 1, yearly: Math.pow(b / a, 365 / span) - 1 };
 }
 
-// Tendances d'un set : 3 mois, 1 an, et rythme annuel retenu pour la projection
-// (sur la plus longue période disponible, borné à −50 % / +100 % par an pour éviter les extrapolations absurdes).
+// Tendances passées d'un set : 3 mois et 1 an (pas de projection : le marché LEGO ne se prolonge pas en ligne droite).
 export function trends(prices, setNo, condition, now = today()) {
-  const m3 = trend(prices, setNo, condition, 91, now);
-  const y1 = trend(prices, setNo, condition, 365, now);
-  const base = y1 || trend(prices, setNo, condition, 182, now) || m3;
-  const rate = base ? Math.min(1, Math.max(-0.5, base.yearly)) : null;
-  return { m3, y1, rate };
+  return { m3: trend(prices, setNo, condition, 91, now), y1: trend(prices, setNo, condition, 365, now) };
 }
 
-// Valeur projetée dans « years » ans si la tendance continue (ce n'est pas une prévision).
-export const project = (value, rate, years = 1) => (value == null || rate == null ? null : value * Math.pow(1 + rate, years));
-
-// Ligne complète pour le tableau de bord : achat, situation, tendances, projection.
+// Ligne complète pour le tableau de bord : achat, situation, tendances passées.
 export function analyze(p, prices, sets = {}, now = today()) {
   const pos = position(p, prices, now);
   const t = trends(prices, p.setNo, p.condition, now);
-  const projected = pos.sold ? null : project(pos.value, t.rate);
   const end = pos.sold ? p.soldDate || now : now;
   return {
     p, pos, t, name: (p.name || "").trim() || sets[p.setNo]?.name || "", alt: sets[p.setNo]?.name || "",
-    projected, projectedGain: projected == null ? null : projected - pos.cost,
     heldDays: Math.max(0, daysBetween(p.date, end)),
     year: p.date.slice(0, 4),
   };
@@ -190,7 +180,6 @@ export function stats(rows) {
     const from = sum(ok, (r) => r.t[key].from * r.p.qty), to = sum(ok, (r) => r.t[key].to * r.p.qty);
     return { pct: to / from - 1, change: to - from, n: ok.length };
   };
-  const projected = sum(held, (r) => r.projected ?? (r.pos.priced ? r.pos.value : r.pos.cost));
 
   const revenue = sum(sold, (r) => r.pos.value), soldCost = sum(sold, (r) => r.pos.cost);
   const byYear = {};
@@ -207,7 +196,6 @@ export function stats(rows) {
       unpriced: held.length - priced.length,
       best: by(priced, (r) => r.pos.pct)[0] || null, worst: by(priced, (r) => r.pos.pct, -1)[0] || null,
       m3: tr("m3"), y1: tr("y1"),
-      projected, projectedGain: projected - invested,
       rising: by(held.filter((r) => r.t.m3?.pct > 0), (r) => r.t.m3.pct).slice(0, 3),
       falling: by(held.filter((r) => r.t.m3?.pct < 0), (r) => r.t.m3.pct, -1).slice(0, 3),
     },
@@ -247,7 +235,6 @@ export const SORTS = {
   cost: { label: "Coût", fn: desc((r) => r.pos.cost) },
   trend3: { label: "Tendance 3 mois", fn: desc((r) => r.t.m3?.pct) },
   trend12: { label: "Tendance 1 an", fn: desc((r) => r.t.y1?.pct) },
-  proj: { label: "Plus-value projetée (1 an)", fn: desc((r) => r.projectedGain) },
   date: { label: "Date d'achat", fn: (a, b) => b.p.date.localeCompare(a.p.date) },
   held: { label: "Durée de détention", fn: desc((r) => r.heldDays) },
   sold: { label: "Date de vente", fn: (a, b) => (b.p.soldDate || "").localeCompare(a.p.soldDate || "") },
@@ -279,14 +266,14 @@ export function splitSale(p, n, soldPrice, soldDate, newId) {
 // Export tableur (séparateur « ; » et virgule décimale, comme Excel en Belgique).
 export function toCSV(purchases, prices, sets) {
   const head = ["Set", "Nom", "État", "Quantité", "Prix unitaire", "Frais", "Coût", "Date d'achat", "Boutique",
-    "Valeur actuelle", "Plus-value", "Rendement %", "Tendance 3 mois %", "Tendance 1 an %", "Valeur projetée 1 an", "Vendu le", "Prix de vente", "Notes"];
+    "Valeur actuelle", "Plus-value", "Rendement %", "Tendance 3 mois %", "Tendance 1 an %", "Vendu le", "Prix de vente", "Notes"];
   const f = (n) => (n == null ? "" : String(Math.round(n * 100) / 100).replace(".", ","));
   const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
   const lines = purchases.map((p) => {
-    const { pos, t, projected } = analyze(p, prices, sets);
+    const { pos, t } = analyze(p, prices, sets);
     const pc = (v) => (v == null ? "" : f(v * 100));
     return [p.setNo, (p.name || "").trim() || sets[p.setNo]?.name, CONDITIONS[p.condition], p.qty, f(p.unitPrice), f(p.fees), f(pos.cost), p.date, p.shop,
-      f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), f(projected), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
+      f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
   });
   return "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");
 }

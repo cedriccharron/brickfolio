@@ -6,10 +6,10 @@ import { lineChart, sparkline } from "./chart.js";
 import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmount, toast, confirmDialog, download } from "./util.js";
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
-  pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, project, splitSale, cost,
+  pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
 } from "./invest.js";
 
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -20,7 +20,7 @@ const S = {
   store: null,
   data: null,
   filter: "held",   // held | sold | all
-  sort: localStorage.getItem("brickfolio-sort") || "gain",
+  sort: ((s) => (s && s !== "proj" ? s : "gain"))(localStorage.getItem("brickfolio-sort")),
   // Filtres du tableau de bord (gardés dans ce navigateur)
   f: (() => { try { return JSON.parse(localStorage.getItem("brickfolio-filters")) || {}; } catch { return {}; } })(),
   filtersOpen: false,
@@ -125,7 +125,7 @@ const FILTER_KEYS = ["q", "cond", "shop", "year", "perf", "trend"];
 const saveFilters = () => { try { localStorage.setItem("brickfolio-filters", JSON.stringify(S.f)); } catch { /* sans importance */ } };
 const activeFilters = () => FILTER_KEYS.filter((k) => S.f[k]).length;
 
-// Toutes les lignes analysées (situation, tendances, projection), puis statut, filtres et tri.
+// Toutes les lignes analysées (situation, tendances passées), puis statut, filtres et tri.
 function allRows() { return S.data.purchases.map((p) => ({ ...analyze(p, S.data.prices, S.data.sets), name: pName(p) })); }
 function viewRows(rows) {
   const byStatus = rows.filter((r) => (S.filter === "all" ? true : S.filter === "sold" ? r.pos.sold : !r.pos.sold));
@@ -172,7 +172,7 @@ function viewPortfolio() {
         <div><span>Bénéfice total</span><strong class="${tone(gain + g.sold.profit)}">${fmtSigned(gain + g.sold.profit)}</strong></div>
         <div><span>Tendance 3 mois</span><strong class="${tone(g.held.m3?.pct)}">${fmtPct(g.held.m3?.pct)}</strong></div>
         <div><span>Tendance 1 an</span><strong class="${tone(g.held.y1?.pct)}">${fmtPct(g.held.y1?.pct)}</strong></div>
-        <div><span>Dans 1 an ?</span><strong>${fmtEur(g.held.projected)}</strong></div>
+        <div><span>Boîtes en stock</span><strong>${g.held.boxes}</strong></div>
       </div>
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
@@ -223,7 +223,7 @@ function panelHeld(h, filtered) {
     <h2>Potentiel du stock${filtered ? " <span class=\"muted small\">(filtré)</span>" : ""}</h2>
     <div class="kpis">
       <div><span>Plus-value latente</span><strong class="${tone(h.latent)}">${fmtSigned(h.latent)}</strong><em>${fmtPct(h.pct)} sur ${fmtEur(h.invested)}</em></div>
-      <div><span>Valeur dans 1 an ?</span><strong>${fmtEur(h.projected)}</strong><em class="${tone(h.projectedGain)}">${fmtSigned(h.projectedGain)} vs investi</em></div>
+      <div><span>Valeur du stock</span><strong>${fmtEur(h.value)}</strong><em>investi ${fmtEur(h.invested)}</em></div>
       <div><span>En gain / en perte</span><strong><b class="up">${h.winners}</b> / <b class="down">${h.losers}</b></strong><em>${h.unpriced ? `${h.unpriced} sans prix` : `${h.count} set(s), ${h.boxes} boîte(s)`}</em></div>
       <div><span>Tendance du stock</span><strong class="${tone(h.m3?.pct)}">${fmtPct(h.m3?.pct)}</strong><em>3 mois · 1 an : ${fmtPct(h.y1?.pct)}</em></div>
     </div>
@@ -232,7 +232,6 @@ function panelHeld(h, filtered) {
       ${h.rising.length ? `<div><h3>Ça monte (3 mois)</h3><ul>${mini(h.rising)}</ul></div>` : ""}
       ${h.falling.length ? `<div><h3>Ça baisse (3 mois)</h3><ul>${mini(h.falling)}</ul></div>` : ""}
     </div>` : ""}
-    <p class="muted tiny">« Dans 1 an ? » prolonge la tendance de prix de chaque set (sur 1 an si possible, sinon 6 ou 3 mois, bornée entre −50 % et +100 % par an). C'est une indication, pas une prévision.</p>
   </section>`;
 }
 
@@ -263,7 +262,6 @@ function rowHtml(r) {
   if (S.sort === "cagr") { main = `<span class="${tone(pos.cagr)}">${fmtPct(pos.cagr)}</span>`; sub = `<span class="small muted">par an</span>`; }
   if (S.sort === "cost") { main = fmtEur(pos.cost); sub = `<span class="small muted">coût</span>`; }
   if (S.sort === "trend3" || S.sort === "trend12") { const x = S.sort === "trend3" ? t.m3 : t.y1; main = `<span class="${tone(x?.pct)}">${fmtPct(x?.pct)}</span>`; sub = `<span class="small muted">${S.sort === "trend3" ? "3 mois" : "1 an"}</span>`; }
-  if (S.sort === "proj" && !pos.sold) { main = fmtEur(r.projected); sub = `<span class="small ${tone(r.projectedGain)}">${fmtSigned(r.projectedGain)} dans 1 an</span>`; }
   if (S.sort === "held") { main = days2txt(r.heldDays); sub = `<span class="small muted">${pos.sold ? "détenu" : "en stock"}</span>`; }
   if (pos.sold && !["cagr", "held", "trend3", "trend12"].includes(S.sort)) { main = `<span class="${tone(pos.gain)}">${fmtSigned(pos.gain)}</span>`; sub = `<span class="small muted">vendu ${fmtEur(pos.value)}</span>`; }
   const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : ""].filter(Boolean).join(" · ");
@@ -410,11 +408,9 @@ function marketChart(p, rows) {
 function trendPanel(p, pos) {
   const t = trends(S.data.prices, p.setNo, p.condition);
   if (!t.m3 && !t.y1) return "";
-  const proj = pos.sold ? null : project(pos.value, t.rate);
   return `<section class="panel stats">
     <div><span>Tendance 3 mois</span><strong class="${tone(t.m3?.pct)}">${fmtPct(t.m3?.pct)}</strong><em>${t.m3 ? `${fmtEur(t.m3.from, 2)} → ${fmtEur(t.m3.to, 2)} la boîte` : "pas assez de relevés"}</em></div>
     <div><span>Tendance 1 an</span><strong class="${tone(t.y1?.pct)}">${fmtPct(t.y1?.pct)}</strong><em>${t.y1 ? `depuis le ${fmtDate(t.y1.since)}` : "pas assez de relevés"}</em></div>
-    ${proj != null ? `<div><span>Dans 1 an ?</span><strong>${fmtEur(proj)}</strong><em class="${tone(proj - pos.cost)}">${fmtSigned(proj - pos.cost)} vs coût, si la tendance (${fmtPct(t.rate)} / an) continue</em></div>` : ""}
   </section>`;
 }
 
