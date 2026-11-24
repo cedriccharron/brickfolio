@@ -116,45 +116,77 @@ export function parseInvoiceText(text, { knownSets = [], today = new Date().toIS
 
   // Sets
   const items = [];
+  const used = new Set(); // lignes déjà rattachées à un set (prix, référence du vendeur, suite du nom)
+  const isLego = (x) => /lego/i.test(x || "");
+  // Ligne qui peut porter le prix d'un set : pas un autre set LEGO, pas un total, une remise ou des frais.
+  const plain = (x) => x && !isLego(x) && !setCandidates(x, known).some((c) => c.known) && !TOTAL.test(x) && !DISCOUNT.test(x) && !SHIPPING.test(x);
+  const texty = (x) => x && /[a-zà-ÿ]{3}/i.test(x) && !amountsIn(x).length && !/\d{4}/.test(x) && x.length < 60
+    && !TOTAL.test(x) && !SHIPPING.test(x) && !DISCOUNT.test(x) && !NOT_ITEM.test(x) && !/(prix|price|prijs|quantit|remise|sous|taux|nom\b|r[ée]f[ée]rence|total|ttc|htva|\(€\))/i.test(x);
+
   lines.forEach((l, i) => {
-    const prevLego = i > 0 && /lego/i.test(lines[i - 1]);
-    const lego = /lego/i.test(l) || prevLego;
+    if (used.has(i)) return;
+    const lego = isLego(l) || isLego(lines[i - 1]);
     const cands = setCandidates(l, known).filter((c) => {
       if (c.known) return true;
       const year = c.digits.length === 4 && +c.digits >= 1990 && +c.digits <= 2040;
       if (lego) return !year && !NOT_ITEM.test(l.replace(/lego/ig, ""));
-      if (c.digits.length < 5 || NOT_ITEM.test(l)) return false;
+      if (c.digits.length !== 5 || NOT_ITEM.test(l)) return false; // hors ligne « LEGO » : seulement 5 chiffres (6 = souvent une référence du vendeur)
       return amountsIn(l).length > 0 || amountsIn(lines[i + 1] || "").length > 0;
     });
     if (!cands.length) return;
     const c = cands[0];
     if (items.some((it) => it.set_no === c.no)) return; // déjà vu (récapitulatif, ligne répétée)
 
-    // Montants de la ligne, sinon des deux lignes suivantes (sans autre set)
+    // Montants de la ligne, sinon des deux lignes suivantes
     let amounts = amountsIn(l, { item: true });
     let src = l;
-    const plain = (x) => x && !setCandidates(x, known).length && !TOTAL.test(x) && !DISCOUNT.test(x) && !SHIPPING.test(x);
-    for (let k = 1; !amounts.length && k <= 2 && plain(lines[i + k]); k++) { src = lines[i + k]; amounts = amountsIn(src, { item: true }); }
+    for (let k = 1; !amounts.length && k <= 2 && plain(lines[i + k]); k++) {
+      src = lines[i + k]; amounts = amountsIn(src, { item: true });
+      used.add(i + k);
+    }
     const neg = amounts.filter((v) => v < 0).reduce((s, v) => s - v, 0);
     const pos = amounts.filter((v) => v > 0);
+    const near = (x, y) => Math.abs(x - y) < 0.02;
+    const count = (v) => pos.filter((a) => near(a, v)).length;
 
     let qty = null;
     for (const re of QTY_RES) { const m = withoutDates(src).replace(c.digits, " ").match(re); if (m && +m[1] > 0) { qty = +m[1]; break; } }
     let unit = null;
-    if (pos.length >= 2) {
-      const first = pos[0], last = pos.at(-1);
-      const ratio = last / first;
-      if (!qty && Math.abs(ratio - Math.round(ratio)) < 0.005 && Math.round(ratio) >= 1 && Math.round(ratio) <= 50) qty = Math.round(ratio);
-      unit = qty && Math.abs(first * qty - last) < 0.05 ? first : qty ? last / qty : first;
-    } else if (pos.length === 1) unit = pos[0];
+    if (!qty) { // quantité déduite d'un couple prix unitaire / total de ligne
+      for (const a of pos) {
+        const k = pos.map((b) => b / a).find((r) => r > 1.5 && r <= 50 && Math.abs(r - Math.round(r)) < 0.005);
+        if (k) { qty = Math.round(k); unit = a; break; }
+      }
+    }
     qty = qty || 1;
+    if (unit == null && pos.length) {
+      // prix unitaire = celui dont on retrouve le total de ligne (ou qui revient deux fois), sinon le premier
+      unit = pos.find((a) => (qty > 1 ? pos.some((b) => near(b, a * qty)) : count(a) >= 2)) ?? pos[0];
+    }
     if (unit != null && neg) unit = Math.max(0, unit - neg / qty);
 
-    const name = l.replace(AMOUNT_ITEM_RE, " ").replace(c.digits + (c.no.endsWith("-1") ? "" : ""), " ").replace(/[€®™]|\bEUR\b/g, " ")
+    let name = l.replace(AMOUNT_ITEM_RE, " ").replace(c.digits, " ").replace(/[€®™]|\bEUR\b/g, " ")
       .replace(/(?:qt[ée]|qty|quantit[ée]|aantal)\s*[:.]?\s*\d+/i, " ").replace(/\s[x×]\s?\d{1,2}\b/i, " ")
       .replace(/\s+\d{1,2}\s*$/, " ").replace(/\s+/g, " ").replace(/^[\s\-–:|*.]+|[\s\-–:|*.]+$/g, "").trim();
-    items.push({ set_no: c.no, name: name.slice(0, 120) || `Set ${c.no}`, qty, unit_price: unit == null ? null : round2(unit), condition: USED.test(all) ? "U" : null });
+    // Suite du nom sur la ligne suivante (après la ligne de prix éventuelle)
+    for (let k = 1; k <= 3; k++) {
+      if (used.has(i + k)) continue;
+      if (texty(lines[i + k])) { name = `${name} ${lines[i + k]}`.trim(); used.add(i + k); }
+      break;
+    }
+    items.push({ set_no: c.no, name: name.slice(0, 120) || `Set ${c.no}`, qty, unit_price: unit == null ? null : round2(unit), condition: USED.test(all) ? "U" : null, _amounts: pos });
   });
+
+  // Un seul set : si le total le confirme, on retient le montant qui donne ce total (TTC plutôt que HT…)
+  if (items.length === 1 && total != null) {
+    const it = items[0];
+    const fit = (v) => Math.abs(v * it.qty + (shipping || 0) - total) < 0.06;
+    if (!(it.unit_price != null && fit(it.unit_price))) {
+      const better = it._amounts.find(fit);
+      if (better != null) it.unit_price = round2(better);
+    }
+  }
+  for (const it of items) delete it._amounts;
 
   // Aucun numéro : une ligne « LEGO » avec un prix devient un set sans numéro
   if (!items.length) {

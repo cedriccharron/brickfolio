@@ -4,15 +4,17 @@
 // Les deux bibliothèques ne sont téléchargées qu'à la première lecture (environ 5 Mo, ensuite en cache).
 import { parseInvoiceText } from "./invoice-parse.js";
 
-const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
-const PDFJS_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+// Version « legacy » de pdf.js : compatible avec les Safari / iPhone plus anciens.
+const PDFJS_BASE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38";
+const PDFJS = `${PDFJS_BASE}/legacy/build/pdf.min.mjs`;
+const PDFJS_WORKER = `${PDFJS_BASE}/legacy/build/pdf.worker.min.mjs`;
 const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_LANGS = "fra+eng"; // français + anglais (chiffres, factures en ligne)
 const MAX_PAGES = 3;
 
 let pdfjsP = null;
 const loadPdfjs = () => (pdfjsP ??= import(PDFJS).then((m) => { m.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; return m; })
-  .catch((e) => { pdfjsP = null; throw new Error("Outil de lecture PDF indisponible (réseau ?)"); }));
+  .catch((e) => { pdfjsP = null; throw new Error(`Outil de lecture PDF indisponible (${e.message || "réseau ?"})`); }));
 
 let tessP = null;
 const loadTesseract = () => (tessP ??= new Promise((resolve, reject) => {
@@ -97,7 +99,12 @@ export async function readInvoiceFile(file, { knownSets = [], onProgress } = {})
   if (file.type === "application/pdf") {
     onProgress?.("Ouverture du PDF…");
     const pdfjs = await loadPdfjs();
-    const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    let pdf;
+    try {
+      pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), standardFontDataUrl: `${PDFJS_BASE}/standard_fonts/` }).promise;
+    } catch (e) {
+      throw new Error(/password/i.test(e?.name || e?.message) ? "PDF protégé par un mot de passe" : `PDF illisible (${e?.message || e})`);
+    }
     text = await pdfText(pdf);
     if (text.replace(/\s/g, "").length < 40) text = await ocr(await pdfCanvases(pdf), onProgress); // PDF scanné
   } else {

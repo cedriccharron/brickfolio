@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -354,6 +354,7 @@ function invoiceBox(d) {
   const inv = sc?.invoice;
   const isPdf = d.invoiceFile.type === "application/pdf";
   const status = d.scanning ? `<span class="muted small" id="scan-progress">${esc(d.progress || "Lecture en cours…")}</span>`
+    : d.scanError ? `<span class="small warn">Lecture impossible : ${esc(d.scanError)}. Remplis le formulaire à la main (la facture reste jointe).</span>`
     : inv ? `<span class="small up">Lue : vérifie les champs ci-dessous</span>` : `<span class="muted small">Jointe sans lecture</span>`;
   const notes = [];
   if (inv?.warning) notes.push(esc(inv.warning));
@@ -400,6 +401,7 @@ async function pickInvoice(file, read) {
   const draft = S.draft;
   draft.invoiceFile = type === file.type ? file : new File([file], file.name, { type });
   draft.scanItem = null;
+  draft.scanError = null;
   if (!read) { render(); return; }
   draft.scanning = true;
   render();
@@ -417,7 +419,7 @@ async function pickInvoice(file, read) {
     if (draft.setNo && !draft.found) lookup();
   } catch (e) {
     draft.scanning = false;
-    toast(e.message, "error");
+    draft.scanError = e?.message || String(e);
     if (S.draft === draft) render();
   }
 }
@@ -593,7 +595,7 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message, "error"); }
   }
   else if (a === "scan-item") { readForm(); applyScan(Number(el.dataset.i)); render(); if (S.draft.setNo && !S.draft.found) lookup(); }
-  else if (a === "draft-file-clear") { readForm(); Object.assign(S.draft, { invoiceFile: null, scanItem: null }); render(); }
+  else if (a === "draft-file-clear") { readForm(); Object.assign(S.draft, { invoiceFile: null, scanItem: null, scanError: null }); render(); }
   else if (a === "toggle-sold") $("#sold-fields").classList.toggle("hidden", !el.checked);
   else if (a === "delete") {
     if (!(await confirmDialog("Supprimer cet achat, son historique et sa facture ?", "Supprimer"))) return;
@@ -644,7 +646,12 @@ document.addEventListener("keydown", (e) => {
 });
 
 if ("serviceWorker" in navigator && !inFrame() && location.protocol === "https:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js").then((reg) => reg.update()).catch(() => {});
+  // Nouvelle version publiée : on recharge, sauf au milieu d'un formulaire (elle sera prise au prochain passage).
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController && !S.draft && !$("#dialog")?.open) location.reload();
+  });
 }
 
 boot();
