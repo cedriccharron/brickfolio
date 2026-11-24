@@ -177,6 +177,18 @@ await test("filtres et tris du tableau de bord", () => {
   assert.deepEqual(ids(sortRows(rows, "date")), ["b", "a", "c"]); // plus récent d'abord
 });
 
+await test("nom choisi prioritaire sur le catalogue, recherche dans les deux", () => {
+  const sets = { "75192-1": { name: "Millennium Falcon - UCS" } };
+  const a = analyze(P({ id: "a", setNo: "75192-1", name: "Faucon Millenium UCS" }), [], sets);
+  const b = analyze(P({ id: "b", setNo: "75192-1", name: "  " }), [], sets);
+  const c = analyze(P({ id: "c", setNo: "10294-1" }), [], sets);
+  assert.equal(a.name, "Faucon Millenium UCS");
+  assert.equal(b.name, "Millennium Falcon - UCS");
+  assert.equal(c.name, "");
+  assert.deepEqual(filterRows([a, b, c], { q: "millennium" }).map((r) => r.p.id), ["a", "b"]);
+  assert.deepEqual(filterRows([a, b, c], { q: "faucon" }).map((r) => r.p.id), ["a"]);
+});
+
 // ---------- BrickLink ----------
 await test("encodage OAuth RFC 3986", () => {
   assert.equal(pct("a b!*'()~"), "a%20b%21%2A%27%28%29~");

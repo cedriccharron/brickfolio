@@ -1,6 +1,6 @@
 // Calculs d'investissement (sans interface, testés dans tests/logic.test.mjs).
 //
-// Achat (purchase) : { id, setNo, condition: "N" | "U", qty, unitPrice, fees, date: "AAAA-MM-JJ",
+// Achat (purchase) : { id, setNo, name (nom choisi, facultatif), condition: "N" | "U", qty, unitPrice, fees, date: "AAAA-MM-JJ",
 //                      shop, notes, soldPrice (total, ou null), soldDate }
 // Relevé de prix (price) : { setNo, condition, on: "AAAA-MM-JJ", avgSold, minSold, maxSold, qtySold,
 //                            avgStock, minStock, qtyStock }   — prix unitaires en euros.
@@ -166,7 +166,7 @@ export function analyze(p, prices, sets = {}, now = today()) {
   const projected = pos.sold ? null : project(pos.value, t.rate);
   const end = pos.sold ? p.soldDate || now : now;
   return {
-    p, pos, t, name: sets[p.setNo]?.name || "",
+    p, pos, t, name: (p.name || "").trim() || sets[p.setNo]?.name || "", alt: sets[p.setNo]?.name || "",
     projected, projectedGain: projected == null ? null : projected - pos.cost,
     heldDays: Math.max(0, daysBetween(p.date, end)),
     year: p.date.slice(0, 4),
@@ -224,7 +224,7 @@ export function stats(rows) {
 export function filterRows(rows, f = {}) {
   const q = (f.q || "").trim().toLowerCase();
   return rows.filter((r) => {
-    if (q && !`${r.p.setNo} ${r.name} ${r.p.shop || ""} ${r.p.notes || ""}`.toLowerCase().includes(q)) return false;
+    if (q && !`${r.p.setNo} ${r.name} ${r.alt || ""} ${r.p.shop || ""} ${r.p.notes || ""}`.toLowerCase().includes(q)) return false;
     if (f.cond && r.p.condition !== f.cond) return false;
     if (f.shop && (r.p.shop || "") !== f.shop) return false;
     if (f.year && r.year !== f.year) return false;
@@ -268,7 +268,7 @@ export function toCSV(purchases, prices, sets) {
   const lines = purchases.map((p) => {
     const { pos, t, projected } = analyze(p, prices, sets);
     const pc = (v) => (v == null ? "" : f(v * 100));
-    return [p.setNo, sets[p.setNo]?.name, CONDITIONS[p.condition], p.qty, f(p.unitPrice), f(p.fees), f(pos.cost), p.date, p.shop,
+    return [p.setNo, (p.name || "").trim() || sets[p.setNo]?.name, CONDITIONS[p.condition], p.qty, f(p.unitPrice), f(p.fees), f(pos.cost), p.date, p.shop,
       f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), f(projected), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
   });
   return "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");

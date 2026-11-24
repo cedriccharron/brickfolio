@@ -24,12 +24,12 @@ const translate = (m) => {
 };
 
 const toRow = (p) => ({
-  id: p.id, set_no: p.setNo, condition: p.condition, qty: p.qty, unit_price: p.unitPrice, fees: p.fees || 0,
+  id: p.id, set_no: p.setNo, name: (p.name || "").trim() || null, condition: p.condition, qty: p.qty, unit_price: p.unitPrice, fees: p.fees || 0,
   bought_on: p.date, shop: p.shop || null, notes: p.notes || null,
   sold_price: p.soldPrice ?? null, sold_on: p.soldPrice != null ? p.soldDate || null : null,
 });
 const fromRow = (r) => ({
-  id: r.id, setNo: r.set_no, condition: r.condition, qty: r.qty, unitPrice: Number(r.unit_price), fees: Number(r.fees) || 0,
+  id: r.id, setNo: r.set_no, name: r.name || "", condition: r.condition, qty: r.qty, unitPrice: Number(r.unit_price), fees: Number(r.fees) || 0,
   date: r.bought_on, shop: r.shop || "", notes: r.notes || "",
   soldPrice: r.sold_price == null ? null : Number(r.sold_price), soldDate: r.sold_on || null,
   invoicePath: r.invoice_path || null, invoiceName: r.invoice_name || null, invoiceType: r.invoice_type || null,

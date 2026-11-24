@@ -122,6 +122,10 @@ begin new.updated_at := now(); return new; end $$;
 drop trigger if exists purchases_touch on public.purchases;
 create trigger purchases_touch before update on public.purchases for each row execute function public.touch();
 
+-- ---------- Nom du set choisi par l'utilisateur (v0.5.1) ----------------------
+-- Rempli par la lecture de facture ou à la main ; sert tant que le catalogue BrickLink n'a pas la fiche.
+alter table public.purchases add column if not exists name text;
+
 -- ---------- Factures (v0.3) ----------------------------------------------------
 -- Une facture (PDF ou photo) par achat, rangée dans le bucket privé « brickfolio-factures »
 -- sous <id du compte>/<id de l'achat>/<fichier>. Chacun ne voit que les siennes.

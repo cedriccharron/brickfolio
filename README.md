@@ -4,7 +4,7 @@ Portefeuille d'investissement LEGO : tu enregistres tes achats, l'app relève ch
 
 ## Ce que fait la version 0.5
 
-- **Achats** : numéro du set (recherche du nom et de l'image sur BrickLink), neuf ou occasion, quantité, prix payé, frais, date, boutique, notes.
+- **Achats** : numéro du set (recherche du nom et de l'image sur BrickLink), nom choisi (facultatif, rempli par la lecture de facture ; prioritaire sur le nom BrickLink), neuf ou occasion, quantité, prix payé, frais, date, boutique, notes.
 - **Ventes** : « Vendu » enregistre le prix de vente net ; la plus-value passe en « réalisée ».
 - **Valeur** : moyenne des ventes BrickLink des 6 derniers mois, en Europe, TVA comprise, dans l'état de l'achat. S'il n'y a eu aucune vente, moyenne des annonces en cours. Un set sans prix est compté à son coût.
 - **Analyse** : valeur totale, montant investi, plus-value latente et réalisée, rendement par set et rendement annualisé (après 6 mois de détention), courbe du portefeuille et de chaque set, détail du marché (nombre de ventes, min/max, annonces).

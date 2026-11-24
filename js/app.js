@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, project,
 } from "./invest.js";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -31,6 +31,8 @@ const S = {
 
 const setOf = (no) => S.data.sets[no] || null;
 const nameOf = (no) => setOf(no)?.name || no;
+// Nom affiché d'un achat : celui choisi (facture ou saisie), sinon le catalogue BrickLink, sinon le numéro.
+const pName = (p) => (p.name || "").trim() || setOf(p.setNo)?.name || p.setNo;
 const purchase = (id) => S.data.purchases.find((p) => p.id === id);
 const imgUrl = (no) => setOf(no)?.image || `https://img.bricklink.com/ItemImage/SN/0/${no}.png`;
 const blUrl = (no) => `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(no)}#T=P`;
@@ -124,7 +126,7 @@ const saveFilters = () => { try { localStorage.setItem("brickfolio-filters", JSO
 const activeFilters = () => FILTER_KEYS.filter((k) => S.f[k]).length;
 
 // Toutes les lignes analysées (situation, tendances, projection), puis statut, filtres et tri.
-function allRows() { return S.data.purchases.map((p) => ({ ...analyze(p, S.data.prices, S.data.sets), name: nameOf(p.setNo) })); }
+function allRows() { return S.data.purchases.map((p) => ({ ...analyze(p, S.data.prices, S.data.sets), name: pName(p) })); }
 function viewRows(rows) {
   const byStatus = rows.filter((r) => (S.filter === "all" ? true : S.filter === "sold" ? r.pos.sold : !r.pos.sold));
   return sortRows(filterRows(byStatus, S.f), S.sort, !!S.f.reverse);
@@ -265,12 +267,14 @@ function rowHtml(r) {
   if (S.sort === "proj" && !pos.sold) { main = fmtEur(r.projected); sub = `<span class="small ${tone(r.projectedGain)}">${fmtSigned(r.projectedGain)} dans 1 an</span>`; }
   if (S.sort === "held") { main = days2txt(r.heldDays); sub = `<span class="small muted">${pos.sold ? "détenu" : "en stock"}</span>`; }
   if (pos.sold && !["cagr", "held", "trend3", "trend12"].includes(S.sort)) { main = `<span class="${tone(pos.gain)}">${fmtSigned(pos.gain)}</span>`; sub = `<span class="small muted">vendu ${fmtEur(pos.value)}</span>`; }
-  const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : "", pos.sold ? `vendu le ${fmtDate(p.soldDate)}` : p.shop ? esc(p.shop) : ""].filter(Boolean).join(" · ");
+  const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : ""].filter(Boolean).join(" · ");
+  const when = [`${icon("calendar", 13)}${fmtDate(p.date)}`, p.shop ? esc(p.shop) : "", pos.sold ? `vendu le ${fmtDate(p.soldDate)}` : ""].filter(Boolean).join(" · ");
   return `<li><a class="pos" href="#/p/${p.id}">
     ${thumb(p.setNo)}
     <span class="grow">
       <strong class="pos-name">${esc(name)}</strong>
       <span class="muted small">${info}</span>
+      <span class="muted small when">${when}</span>
       ${!pos.sold && t.m3 ? `<span class="small">${pctTag(t.m3.pct, "3 mois")}</span>` : ""}
     </span>
     ${sparkline(hist, (pos.gain ?? 0) >= 0)}
@@ -289,7 +293,7 @@ function viewDetail(p) {
   const market = [...rows].reverse().find((r) => !r.manual); // dernier relevé BrickLink
   const recent = rows.slice(-10).reverse();
 
-  return `${top(set?.name || p.setNo, { back: "#/", sub: `${esc(p.setNo)}${set?.year ? ` · ${set.year}` : ""} · ${CONDITIONS[p.condition]}`,
+  return `${top(pName(p), { back: "#/", sub: `${esc(p.setNo)}${set?.year ? ` · ${set.year}` : ""} · ${CONDITIONS[p.condition]}`,
       actions: `<a class="icon-btn" href="#/p/${p.id}/edit" aria-label="Modifier">${icon("edit")}</a>` })}
     <div class="detail-head">
       ${thumb(p.setNo, "xl")}
@@ -377,7 +381,7 @@ async function viewInvoice(p) {
   const isPdf = p.invoiceType === "application/pdf";
   dlg.innerHTML = `<form method="dialog" class="dlg">
     <h2>Facture</h2>
-    <p class="muted small">${esc(nameOf(p.setNo))} · ${esc(p.invoiceName || "")}</p>
+    <p class="muted small">${esc(pName(p))} · ${esc(p.invoiceName || "")}</p>
     ${isPdf ? `<div class="invoice-pdf">${icon("file", 48)}</div>` : `<img class="invoice-img" src="${esc(url)}" alt="Facture">`}
     <div class="dlg-actions">
       <button value="cancel" class="btn ghost">Fermer</button>
@@ -422,6 +426,8 @@ function viewForm(p) {
             <p class="muted small">Catalogue BrickLink indisponible pour l'instant : le nom et l'image du set seront complétés au premier relevé. Tu peux enregistrer.</p>`
         : d.lookedUp ? `<p class="warn small">Set introuvable sur BrickLink : vérifie le numéro (tu peux quand même l'enregistrer).</p>`
         : d.scanName && d.setNo ? `<div class="found">${thumb(normalizeSetNo(d.setNo))}<div><strong>${esc(d.scanName)}</strong><span class="muted small">nom lu sur la facture</span></div></div>` : ""}
+      <label class="field"><span>Nom du set <em class="opt">facultatif</em></span><input name="name" value="${esc(d.name || "")}" placeholder="${esc(d.found?.name || "ex. Faucon Millenium UCS")}" maxlength="120">
+        <span class="hint">Affiché dans le portefeuille ; sinon le nom du catalogue BrickLink est utilisé.</span></label>
       <fieldset class="field"><legend>État</legend>
         <div class="seg">${Object.entries(CONDITIONS).map(([k, l]) => `<label class="seg-opt"><input type="radio" name="condition" value="${k}" ${d.condition === k ? "checked" : ""}>${l}</label>`).join("")}</div>
       </fieldset>
@@ -447,7 +453,7 @@ function viewForm(p) {
     </form>`;
 }
 
-const newDraft = () => ({ id: "new", setNo: "", condition: "N", qty: 1, unitPrice: "", fees: "", date: todayIso(), shop: "", notes: "",
+const newDraft = () => ({ id: "new", setNo: "", name: "", condition: "N", qty: 1, unitPrice: "", fees: "", date: todayIso(), shop: "", notes: "",
   soldPrice: null, soldDate: null, found: null, sold: false, invoiceFile: null, scanning: false, scanItem: null });
 
 // Encart « Facture » du nouvel achat : lecture sur l'appareil (texte du PDF ou OCR de la photo), ou simple pièce jointe.
@@ -492,6 +498,9 @@ const invoiceType = (file) => {
   const type = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : /\.(heic|heif)$/i.test(file.name) ? "image/heic" : "");
   return INVOICE_TYPES.includes(type) ? type : null;
 };
+// Nom lu sur la facture, sans « LEGO® » ni gamme en tête si un nom suit (« LEGO Star Wars UCS Faucon » → garde tout sauf LEGO).
+const cleanName = (s) => String(s || "").replace(/\bLEGO\b[®™]?\s*/i, "").replace(/\s+/g, " ").trim().slice(0, 120);
+
 // Remplit le brouillon avec l'en-tête de la facture et la ligne i.
 function applyScan(i) {
   const { invoice, used } = S.scan;
@@ -502,7 +511,7 @@ function applyScan(i) {
   const it = invoice.items[i];
   d.scanItem = it ? i : null;
   if (!it) return;
-  Object.assign(d, { setNo: it.set_no || "", qty: it.qty, unitPrice: it.unit_price ?? "", found: it.set_no ? S.data.sets[it.set_no] || null : null, lookedUp: false, lookupError: null, scanName: it.name || null });
+  Object.assign(d, { setNo: it.set_no || "", qty: it.qty, unitPrice: it.unit_price ?? "", found: it.set_no ? S.data.sets[it.set_no] || null : null, lookedUp: false, lookupError: null, scanName: it.name || null, name: cleanName(it.name) });
   if (it.condition) d.condition = it.condition;
 }
 
@@ -548,7 +557,7 @@ function readForm() {
     Object.assign(S.draft, { scanName: null, lookupError: null, lookedUp: false, found: null });
   }
   Object.assign(S.draft, {
-    setNo: fd.get("setNo"), condition: fd.get("condition") || "N", qty: fd.get("qty"), unitPrice: fd.get("unitPrice"),
+    setNo: fd.get("setNo"), name: fd.get("name") ?? S.draft.name, condition: fd.get("condition") || "N", qty: fd.get("qty"), unitPrice: fd.get("unitPrice"),
     fees: fd.get("fees"), date: fd.get("date"), shop: fd.get("shop"), notes: fd.get("notes"),
     sold: fd.get("sold") === "on", soldPrice: fd.get("soldPrice"), soldDate: fd.get("soldDate"),
   });
@@ -590,7 +599,7 @@ async function savePurchase() {
   if (d.sold && d.soldDate < d.date) return toast("La vente ne peut pas précéder l'achat", "error");
 
   const p = {
-    id: d.id === "new" ? uuid() : d.id, setNo, condition: d.condition, qty, unitPrice, fees, date: d.date,
+    id: d.id === "new" ? uuid() : d.id, setNo, name: (d.name || "").trim(), condition: d.condition, qty, unitPrice, fees, date: d.date,
     shop: (d.shop || "").trim(), notes: (d.notes || "").trim(), soldPrice, soldDate: d.sold ? d.soldDate : null,
   };
   const isNewPair = !S.data.prices.some((r) => r.setNo === setNo && r.condition === p.condition);
@@ -675,7 +684,7 @@ function manualDialog(p) {
   const last = position(p, S.data.prices).unit;
   dlg.innerHTML = `<form method="dialog" class="dlg" id="manual-form">
     <h2>Valeur d'une boîte</h2>
-    <p class="muted small">${esc(nameOf(p.setNo))} · ${CONDITIONS[p.condition].toLowerCase()}. Elle remplace la valeur actuelle jusqu'au prochain relevé BrickLink plus récent.</p>
+    <p class="muted small">${esc(pName(p))} · ${CONDITIONS[p.condition].toLowerCase()}. Elle remplace la valeur actuelle jusqu'au prochain relevé BrickLink plus récent.</p>
     <label class="field"><span>Valeur par boîte (€)</span><input name="value" inputmode="decimal" placeholder="${last != null ? esc(String(last).replace(".", ",")) : "0,00"}" required autofocus></label>
     <label class="field"><span>Date</span><input name="on" type="date" value="${todayIso()}" max="${todayIso()}" required></label>
     <label class="field"><span>Source (facultatif)</span><input name="note" placeholder="BrickEconomy, 2ememain, Vinted…" maxlength="120"></label>
