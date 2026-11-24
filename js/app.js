@@ -9,7 +9,7 @@ import {
   pricesFor, unitValue, valueSource, SORTS, toCSV,
 } from "./invest.js";
 
-const VERSION = "0.4.3";
+const VERSION = "0.4.4";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -359,6 +359,7 @@ function invoiceBox(d) {
   const status = d.scanning ? `<span class="muted small" id="scan-progress">${esc(d.progress || "Lecture en cours…")}</span>`
     : d.scanError ? `<span class="small warn">Lecture impossible : ${esc(d.scanError)}. Remplis le formulaire à la main (la facture reste jointe).</span>`
     : inv ? `<span class="small up">Lue : vérifie les champs ci-dessous</span>` : `<span class="muted small">Jointe sans lecture</span>`;
+  const readBtn = !d.scanning && !inv ? `<button type="button" class="btn ghost small" data-action="scan-again">${icon("scan", 16)} ${d.scanError ? "Réessayer" : "Lire cette facture"}</button>` : "";
   const notes = [];
   if (inv?.warning) notes.push(esc(inv.warning));
   return `<div class="scan-box">
@@ -367,6 +368,7 @@ function invoiceBox(d) {
       <span class="grow"><strong>${esc(d.invoiceFile.name)}</strong>${status}</span>
       ${d.scanning ? "" : `<button type="button" class="icon-btn mini" data-action="draft-file-clear" aria-label="Retirer la facture">${icon("trash", 16)}</button>`}
     </div>
+    ${readBtn ? `<div class="scan-actions scan-again">${readBtn}</div>` : ""}
     ${notes.map((t) => `<p class="warn small">${t}</p>`).join("")}
     ${inv?.items.length > 1 ? `<p class="small scan-title">${inv.items.length} sets sur cette facture : choisis celui à enregistrer.</p>
       <div class="scan-items">${inv.items.map((it, i) => `<button type="button" class="scan-item ${d.scanItem === i ? "on" : ""} ${sc.used.has(i) ? "done" : ""}" data-action="scan-item" data-i="${i}">
@@ -608,6 +610,7 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message, "error"); }
   }
   else if (a === "scan-item") { readForm(); applyScan(Number(el.dataset.i)); render(); if (S.draft.setNo && !S.draft.found) lookup(); }
+  else if (a === "scan-again") pickInvoice(S.draft.invoiceFile, true);
   else if (a === "draft-file-clear") { readForm(); Object.assign(S.draft, { invoiceFile: null, scanItem: null, scanError: null }); render(); }
   else if (a === "toggle-sold") $("#sold-fields").classList.toggle("hidden", !el.checked);
   else if (a === "delete") {

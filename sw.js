@@ -1,6 +1,6 @@
 // Service worker : garde l'app disponible sans réseau.
 // Incrémente VERSION à chaque mise en ligne pour forcer la mise à jour.
-const VERSION = "brickfolio-0.4.3";
+const VERSION = "brickfolio-0.4.4";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest", "css/app.css",
   "js/app.js", "js/config.js", "js/util.js", "js/icons.js", "js/chart.js", "js/invest.js", "js/store-demo.js", "js/store-supabase.js", "js/invoice-parse.js", "js/invoice-read.js", "js/vendor/supabase.js",
@@ -8,7 +8,8 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // « reload » : on ignore le cache HTTP du navigateur (GitHub Pages le garde 10 minutes) pour ne pas installer d'anciens fichiers.
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
@@ -20,7 +21,8 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req).then((res) => {
+    // « no-cache » : toujours revérifier auprès du serveur (réponse 304 rapide si rien n'a changé).
+    fetch(req, { cache: "no-cache" }).then((res) => {
       const copy = res.clone();
       caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
       return res;
