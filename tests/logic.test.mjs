@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource,
+  manualRow, valueSource, trend, trends, project, analyze, stats, filterRows, sortRows,
 } from "../js/invest.js";
 import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
 
@@ -102,6 +102,79 @@ await test("valeur manuelle : utilisée si plus récente, prime le même jour", 
   assert.equal(position(P(), [...prices, R("2024-03-01", 620)], "2024-03-02").unit, 620);
   assert.equal(position(P(), [R("2024-03-01", 620), m("2024-03-01", 700)], "2024-03-02").unit, 700);
   assert.deepEqual(positionHistory(P(), prices).map((x) => x.value), [500, 600, 650]);
+});
+
+// ---------- Tableau de bord : tendances, statistiques, filtres, tris ----------
+await test("tendance sur 3 mois et 1 an, rythme annuel borné", () => {
+  const prices = [R("2023-06-01", 500), R("2024-03-01", 540), R("2024-06-01", 600)];
+  const m3 = trend(prices, "10294-1", "N", 91, "2024-06-10");
+  assert.equal(m3.since, "2024-03-01");
+  assert.ok(Math.abs(m3.pct - (600 / 540 - 1)) < 1e-9);
+  const y1 = trend(prices, "10294-1", "N", 365, "2024-06-10");
+  assert.equal(y1.since, "2023-06-01");
+  assert.ok(Math.abs(y1.pct - 0.2) < 1e-9);
+  assert.equal(trend(prices, "10294-1", "N", 365 * 3, "2024-06-10"), null); // historique trop court
+  assert.equal(trend([R("2024-06-01", 600)], "10294-1", "N", 91, "2024-06-10"), null);
+  const t = trends(prices, "10294-1", "N", "2024-06-10");
+  assert.ok(Math.abs(t.rate - 0.2) < 0.01);
+  const wild = trends([R("2024-03-01", 100), R("2024-06-01", 300)], "10294-1", "N", "2024-06-10");
+  assert.equal(wild.rate, 1); // +200 % en 3 mois : plafonné à +100 % / an
+  assert.equal(project(1000, 0.1), 1100);
+  assert.equal(project(null, 0.1), null);
+});
+
+await test("statistiques : stock, potentiel, tendance, ventes par année", () => {
+  const prices = [R("2023-06-01", 500), R("2024-03-01", 540), R("2024-06-01", 600),
+    R("2023-06-01", 200, null, { setNo: "21318-1" }), R("2024-06-01", 180, null, { setNo: "21318-1" })];
+  const purchases = [
+    P({ id: "a", qty: 2 }),
+    P({ id: "b", setNo: "21318-1", unitPrice: 190, date: "2023-05-01", shop: "Fnac" }),
+    P({ id: "c", soldPrice: 700, soldDate: "2024-01-01", shop: "Fnac" }),
+    P({ id: "d", setNo: "99999-1", unitPrice: 50, date: "2024-05-01", condition: "U" }),
+  ];
+  const rows = purchases.map((p) => analyze(p, prices, { "10294-1": { name: "Titanic" } }, "2024-06-10"));
+  const s = stats(rows);
+  assert.equal(s.held.count, 3);
+  assert.equal(s.held.invested, 1000 + 190 + 50);
+  assert.equal(s.held.value, 1200 + 180 + 50);    // sans prix : compté au coût
+  assert.equal(s.held.latent, 200 - 10);
+  assert.equal(s.held.winners, 1);
+  assert.equal(s.held.losers, 1);
+  assert.equal(s.held.unpriced, 1);
+  assert.equal(s.held.best.p.id, "a");
+  assert.equal(s.held.worst.p.id, "b");
+  assert.ok(Math.abs(s.held.y1.pct - ((1200 + 180) / (1000 + 200) - 1)) < 1e-9);
+  assert.deepEqual(s.held.rising.map((r) => r.p.id), ["a"]);   // 3 mois : 540 → 600
+  assert.deepEqual(s.held.falling.map((r) => r.p.id), []);      // 21318 : pas de relevé il y a 3 mois
+  assert.equal(s.sold.count, 1);
+  assert.equal(s.sold.profit, 200);
+  assert.equal(s.sold.avgDays, 365);
+  assert.deepEqual(s.sold.byYear.map((y) => [y.year, y.count, y.profit]), [["2024", 1, 200]]);
+  assert.ok(s.held.projected > s.held.value); // tendance globale en hausse
+});
+
+await test("filtres et tris du tableau de bord", () => {
+  const prices = [R("2024-03-01", 540), R("2024-06-01", 600), R("2024-03-01", 200, null, { setNo: "21318-1" }), R("2024-06-01", 180, null, { setNo: "21318-1" })];
+  const rows = [
+    P({ id: "a" }),
+    P({ id: "b", setNo: "21318-1", unitPrice: 190, date: "2023-05-01", shop: "Fnac", condition: "N" }),
+    P({ id: "c", setNo: "75192-1", unitPrice: 700, condition: "U", shop: "Vinted" }),
+  ].map((p) => analyze(p, prices, { "10294-1": { name: "Titanic" } }, "2024-06-10"));
+  const ids = (rs) => rs.map((r) => r.p.id);
+  assert.deepEqual(ids(filterRows(rows, { q: "titan" })), ["a"]);
+  assert.deepEqual(ids(filterRows(rows, { q: "fnac" })), ["b"]);
+  assert.deepEqual(ids(filterRows(rows, { cond: "U" })), ["c"]);
+  assert.deepEqual(ids(filterRows(rows, { year: "2023" })), ["a", "b", "c"]);
+  assert.deepEqual(ids(filterRows(rows, { year: "2024" })), []);
+  assert.deepEqual(ids(filterRows(rows, { shop: "Vinted" })), ["c"]);
+  assert.deepEqual(ids(filterRows(rows, { perf: "gain" })), ["a"]);
+  assert.deepEqual(ids(filterRows(rows, { perf: "loss" })), ["b"]);
+  assert.deepEqual(ids(filterRows(rows, { perf: "unpriced" })), ["c"]);
+  assert.deepEqual(ids(filterRows(rows, { trend: "down" })), ["b"]);
+  assert.deepEqual(ids(sortRows(rows, "gain")), ["a", "b", "c"]);       // sans prix en dernier
+  assert.deepEqual(ids(sortRows(rows, "gain", true)), ["c", "b", "a"]);
+  assert.deepEqual(ids(sortRows(rows, "trend3")), ["a", "b", "c"]);
+  assert.deepEqual(ids(sortRows(rows, "date")), ["b", "a", "c"]); // plus récent d'abord
 });
 
 // ---------- BrickLink ----------

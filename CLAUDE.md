@@ -15,6 +15,7 @@ Suivi d'investissement LEGO : achats, valeur BrickLink relevée chaque semaine, 
 ## Décisions prises
 - Source de prix : BrickLink, guide des prix « vendus » sur 6 mois (moyenne pondérée par quantité, Europe, EUR, TVA comprise), repli sur les annonces en cours. Un relevé par set, état et jour (`unique (set_no, condition, fetched_on)`).
 - Valeurs manuelles (`manual_values`, par compte) fusionnées dans les relevés côté client (`manualRow`, `manual: true`) ; le même jour, la valeur manuelle prime sur BrickLink.
+- Tableau de bord (v0.5) : `analyze()` → ligne (situation, tendances `trends()` 3 mois / 1 an, projection, durée de détention) ; `stats()` sur les lignes filtrées ; `filterRows()` / `sortRows()`. Tendance : relevé de départ au plus près de la date de début (pas plus vieux que la moitié de la période), historique ≥ 60 % de la période. Projection = rythme annuel borné [−50 %, +100 %]. Filtres gardés dans `localStorage` `brickfolio-filters`.
 - Valeur d'un set sans prix = son coût. Rendement annualisé affiché seulement après 182 jours.
 - Prix de vente saisi en net (total du lot), frais d'achat inclus dans le coût.
 - Factures (v0.3) : un fichier par achat (PDF ou photo, 10 Mo max) dans le bucket privé `brickfolio-factures`, chemin `<uid>/<id achat>/<horodatage>-<nom>` ; colonnes `invoice_path/name/type` sur `purchases`. Ouverture par lien signé de 10 min. En démo : data URL dans `brickfolio-demo-factures` (3 Mo max).

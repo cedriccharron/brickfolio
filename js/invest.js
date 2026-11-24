@@ -126,25 +126,150 @@ export function portfolioHistory(purchases, prices) {
   return out;
 }
 
-// Tri de la liste des achats.
+const addDays = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// Tendance du prix d'une boîte sur une période (jours) : du relevé d'il y a « days » jours au dernier.
+// null si l'historique couvre moins de 60 % de la période.
+export function trend(prices, setNo, condition, days, now = today()) {
+  const rows = pricesFor(prices, setNo, condition).filter((r) => r.on <= now && unitValue(r) != null);
+  if (rows.length < 2) return null;
+  const last = rows.at(-1);
+  const start = addDays(last.on, -days);
+  // Relevé de départ : le dernier avant la date de début, s'il n'est pas trop ancien ; sinon le premier après.
+  let first = [...rows].reverse().find((r) => r.on <= start);
+  if (!first || daysBetween(first.on, start) > days * 0.5) first = rows.find((r) => r.on > start);
+  if (!first || first === last) return null;
+  const span = daysBetween(first.on, last.on);
+  if (span < days * 0.6) return null;
+  const a = unitValue(first), b = unitValue(last);
+  if (!(a > 0)) return null;
+  return { from: a, to: b, since: first.on, days: span, pct: b / a - 1, yearly: Math.pow(b / a, 365 / span) - 1 };
+}
+
+// Tendances d'un set : 3 mois, 1 an, et rythme annuel retenu pour la projection
+// (sur la plus longue période disponible, borné à −50 % / +100 % par an pour éviter les extrapolations absurdes).
+export function trends(prices, setNo, condition, now = today()) {
+  const m3 = trend(prices, setNo, condition, 91, now);
+  const y1 = trend(prices, setNo, condition, 365, now);
+  const base = y1 || trend(prices, setNo, condition, 182, now) || m3;
+  const rate = base ? Math.min(1, Math.max(-0.5, base.yearly)) : null;
+  return { m3, y1, rate };
+}
+
+// Valeur projetée dans « years » ans si la tendance continue (ce n'est pas une prévision).
+export const project = (value, rate, years = 1) => (value == null || rate == null ? null : value * Math.pow(1 + rate, years));
+
+// Ligne complète pour le tableau de bord : achat, situation, tendances, projection.
+export function analyze(p, prices, sets = {}, now = today()) {
+  const pos = position(p, prices, now);
+  const t = trends(prices, p.setNo, p.condition, now);
+  const projected = pos.sold ? null : project(pos.value, t.rate);
+  const end = pos.sold ? p.soldDate || now : now;
+  return {
+    p, pos, t, name: sets[p.setNo]?.name || "",
+    projected, projectedGain: projected == null ? null : projected - pos.cost,
+    heldDays: Math.max(0, daysBetween(p.date, end)),
+    year: p.date.slice(0, 4),
+  };
+}
+
+// Statistiques d'un ensemble de lignes (après filtres) : stock, potentiel, tendances, ventes.
+export function stats(rows) {
+  const held = rows.filter((r) => !r.pos.sold), sold = rows.filter((r) => r.pos.sold);
+  const priced = held.filter((r) => r.pos.priced);
+  const sum = (arr, f) => arr.reduce((s, r) => s + (f(r) ?? 0), 0);
+  const by = (arr, f, dir = 1) => [...arr].filter((r) => f(r) != null).sort((a, b) => dir * (f(b) - f(a)));
+
+  const invested = sum(held, (r) => r.pos.cost);
+  const value = sum(held, (r) => (r.pos.priced ? r.pos.value : r.pos.cost));
+  const latent = sum(priced, (r) => r.pos.gain);
+  // Tendance du stock à quantités constantes (sets qui ont un historique sur la période)
+  const tr = (key) => {
+    const ok = held.filter((r) => r.t[key]);
+    if (!ok.length) return null;
+    const from = sum(ok, (r) => r.t[key].from * r.p.qty), to = sum(ok, (r) => r.t[key].to * r.p.qty);
+    return { pct: to / from - 1, change: to - from, n: ok.length };
+  };
+  const projected = sum(held, (r) => r.projected ?? (r.pos.priced ? r.pos.value : r.pos.cost));
+
+  const revenue = sum(sold, (r) => r.pos.value), soldCost = sum(sold, (r) => r.pos.cost);
+  const byYear = {};
+  for (const r of sold) {
+    const y = (r.p.soldDate || "").slice(0, 4) || "?";
+    const e = (byYear[y] ??= { year: y, count: 0, revenue: 0, cost: 0, profit: 0 });
+    e.count++; e.revenue += r.pos.value; e.cost += r.pos.cost; e.profit += r.pos.gain;
+  }
+  return {
+    held: {
+      count: held.length, boxes: sum(held, (r) => Number(r.p.qty) || 0), invested, value, latent,
+      pct: invested ? (value - invested) / invested : null,
+      winners: priced.filter((r) => r.pos.gain > 0).length, losers: priced.filter((r) => r.pos.gain < 0).length,
+      unpriced: held.length - priced.length,
+      best: by(priced, (r) => r.pos.pct)[0] || null, worst: by(priced, (r) => r.pos.pct, -1)[0] || null,
+      m3: tr("m3"), y1: tr("y1"),
+      projected, projectedGain: projected - invested,
+      rising: by(held.filter((r) => r.t.m3?.pct > 0), (r) => r.t.m3.pct).slice(0, 3),
+      falling: by(held.filter((r) => r.t.m3?.pct < 0), (r) => r.t.m3.pct, -1).slice(0, 3),
+    },
+    sold: {
+      count: sold.length, revenue, cost: soldCost, profit: revenue - soldCost, pct: soldCost ? (revenue - soldCost) / soldCost : null,
+      avgDays: sold.length ? Math.round(sum(sold, (r) => r.heldDays) / sold.length) : null,
+      best: by(sold, (r) => r.pos.gain)[0] || null, worst: by(sold, (r) => r.pos.gain, -1)[0] || null,
+      byYear: Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year)),
+    },
+  };
+}
+
+// Filtres du tableau de bord. f = { q, cond, shop, year, perf, trend }
+export function filterRows(rows, f = {}) {
+  const q = (f.q || "").trim().toLowerCase();
+  return rows.filter((r) => {
+    if (q && !`${r.p.setNo} ${r.name} ${r.p.shop || ""} ${r.p.notes || ""}`.toLowerCase().includes(q)) return false;
+    if (f.cond && r.p.condition !== f.cond) return false;
+    if (f.shop && (r.p.shop || "") !== f.shop) return false;
+    if (f.year && r.year !== f.year) return false;
+    if (f.perf === "gain" && !(r.pos.gain > 0)) return false;
+    if (f.perf === "loss" && !(r.pos.gain < 0)) return false;
+    if (f.perf === "unpriced" && r.pos.priced) return false;
+    if (f.trend === "up" && !(r.t.m3?.pct > 0)) return false;
+    if (f.trend === "down" && !(r.t.m3?.pct < 0)) return false;
+    return true;
+  });
+}
+
+// Tris (ordre naturel : du plus grand au plus petit, du plus récent au plus ancien ; « reverse » inverse).
+const desc = (f) => (a, b) => (f(b) ?? -Infinity) - (f(a) ?? -Infinity);
 export const SORTS = {
-  gain: { label: "Plus-value", fn: (a, b) => (b.pos.gain ?? -Infinity) - (a.pos.gain ?? -Infinity) },
-  pct: { label: "Rendement", fn: (a, b) => (b.pos.pct ?? -Infinity) - (a.pos.pct ?? -Infinity) },
-  value: { label: "Valeur", fn: (a, b) => (b.pos.value ?? 0) - (a.pos.value ?? 0) },
+  gain: { label: "Plus-value (€)", fn: desc((r) => r.pos.gain) },
+  pct: { label: "Rendement (%)", fn: desc((r) => r.pos.pct) },
+  cagr: { label: "Rendement annualisé", fn: desc((r) => r.pos.cagr) },
+  value: { label: "Valeur", fn: desc((r) => r.pos.value) },
+  cost: { label: "Coût", fn: desc((r) => r.pos.cost) },
+  trend3: { label: "Tendance 3 mois", fn: desc((r) => r.t.m3?.pct) },
+  trend12: { label: "Tendance 1 an", fn: desc((r) => r.t.y1?.pct) },
+  proj: { label: "Plus-value projetée (1 an)", fn: desc((r) => r.projectedGain) },
   date: { label: "Date d'achat", fn: (a, b) => b.p.date.localeCompare(a.p.date) },
+  held: { label: "Durée de détention", fn: desc((r) => r.heldDays) },
+  sold: { label: "Date de vente", fn: (a, b) => (b.p.soldDate || "").localeCompare(a.p.soldDate || "") },
   name: { label: "Nom", fn: (a, b) => (a.name || a.p.setNo).localeCompare(b.name || b.p.setNo, "fr") },
 };
+export function sortRows(rows, key, reverse = false) {
+  const fn = (SORTS[key] || SORTS.gain).fn;
+  const out = [...rows].sort(fn);
+  return reverse ? out.reverse() : out;
+}
 
 // Export tableur (séparateur « ; » et virgule décimale, comme Excel en Belgique).
 export function toCSV(purchases, prices, sets) {
   const head = ["Set", "Nom", "État", "Quantité", "Prix unitaire", "Frais", "Coût", "Date d'achat", "Boutique",
-    "Valeur actuelle", "Plus-value", "Rendement %", "Vendu le", "Prix de vente", "Notes"];
+    "Valeur actuelle", "Plus-value", "Rendement %", "Tendance 3 mois %", "Tendance 1 an %", "Valeur projetée 1 an", "Vendu le", "Prix de vente", "Notes"];
   const f = (n) => (n == null ? "" : String(Math.round(n * 100) / 100).replace(".", ","));
   const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
   const lines = purchases.map((p) => {
-    const pos = position(p, prices);
+    const { pos, t, projected } = analyze(p, prices, sets);
+    const pc = (v) => (v == null ? "" : f(v * 100));
     return [p.setNo, sets[p.setNo]?.name, CONDITIONS[p.condition], p.qty, f(p.unitPrice), f(p.fees), f(pos.cost), p.date, p.shop,
-      f(pos.value), f(pos.gain), pos.pct == null ? "" : f(pos.pct * 100), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
+      f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), f(projected), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
   });
   return "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");
 }

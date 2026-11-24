@@ -2,12 +2,18 @@
 
 Portefeuille d'investissement LEGO : tu enregistres tes achats, l'app relève chaque semaine leur valeur sur BrickLink et calcule ta plus-value. Application web installable (PWA), même architecture que Cap'taine : JavaScript sans compilation, hébergement GitHub Pages, Supabase pour les données et le relevé automatique des prix.
 
-## Ce que fait la version 0.4
+## Ce que fait la version 0.5
 
 - **Achats** : numéro du set (recherche du nom et de l'image sur BrickLink), neuf ou occasion, quantité, prix payé, frais, date, boutique, notes.
 - **Ventes** : « Vendu » enregistre le prix de vente net ; la plus-value passe en « réalisée ».
 - **Valeur** : moyenne des ventes BrickLink des 6 derniers mois, en Europe, TVA comprise, dans l'état de l'achat. S'il n'y a eu aucune vente, moyenne des annonces en cours. Un set sans prix est compté à son coût.
 - **Analyse** : valeur totale, montant investi, plus-value latente et réalisée, rendement par set et rendement annualisé (après 6 mois de détention), courbe du portefeuille et de chaque set, détail du marché (nombre de ventes, min/max, annonces).
+- **Tableau de bord** : valeur du stock, investi, plus-value latente et réalisée, bénéfice total, tendance du stock sur 3 mois et 1 an, valeur projetée dans 1 an ; graphique sur 3 mois, 1 an ou tout l'historique. Vues « En stock », « Vendus » et « Tout ».
+  - **Potentiel du stock** : plus-value latente, sets en gain / en perte, meilleur et moins bon, valeur dans 1 an si les tendances continuent, sets qui montent et qui baissent sur 3 mois.
+  - **Ventes** : bénéfice réalisé, montant encaissé, durée moyenne de détention, meilleure vente, détail par année.
+  - **Filtres** (gardés d'une visite à l'autre) : recherche (nom, numéro, boutique, note), état, boutique, année d'achat, résultat (en gain, en perte, sans prix), tendance 3 mois. Les statistiques suivent les filtres.
+  - **Tris** : plus-value, rendement, rendement annualisé, valeur, coût, tendance 3 mois ou 1 an, plus-value projetée, date d'achat, durée de détention, date de vente, nom ; ordre inversable. La colonne de droite montre la valeur du tri choisi.
+  - **Projection** : tendance de prix de chaque set (1 an si possible, sinon 6 ou 3 mois), bornée entre −50 % et +100 % par an. Indication, pas prévision.
 - **Valeur manuelle** : sur la fiche d'un set, « Encoder » une valeur par boîte (BrickEconomy, 2ememain, estimation…). Elle sert de valeur actuelle jusqu'à un relevé BrickLink plus récent, apparaît dans l'historique et la courbe, et peut être supprimée. Chaque compte a les siennes.
 - **Lecture de facture** (gratuite, sur l'appareil) : dans « Nouvel achat », « Lire une facture » essaie de remplir le formulaire depuis un PDF ou une photo : boutique, date, numéro du set, quantité, prix par boîte (remise répartie si le total le confirme), frais de port et de service. Le texte d'un PDF en ligne est lu directement (pdf.js) ; une photo ou un PDF scanné passe par une reconnaissance de caractères (Tesseract), téléchargée à la première lecture puis gardée en cache. Ce sont des règles, pas une IA : on vérifie toujours, et « Voir le texte lu » montre ce que l'app a compris. Plusieurs sets sur une facture : on choisit la ligne, puis l'app propose d'encoder les suivants. « Joindre sans lire » garde la facture pour un encodage manuel.
 - **Facture** : sur la fiche d'un set, « Joindre » un PDF ou une photo du ticket (10 Mo au plus). On peut l'ouvrir, la remplacer ou la supprimer ; elle est privée (dossier par compte) et supprimée avec l'achat.
