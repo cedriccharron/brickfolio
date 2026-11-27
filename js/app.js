@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
 } from "./invest.js";
 
-const VERSION = "0.10.1";
+const VERSION = "0.10.2";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -275,7 +275,15 @@ function viewOpps() {
   }
   const owned = new Set(S.data.purchases.filter((p) => !isSold(p)).map((p) => p.setNo));
   const watched = new Set(S.opps.watched);
-  let list = rankCandidates(S.opps.catalog, { now: todayIso(), owned, watched });
+  // Prix BrickLink déjà relevés pour mes propres sets (neuf) : utilisés si le catalogue n'a pas encore le sien, ou un plus ancien.
+  const mine = new Map();
+  for (const r of S.data.prices) if (!r.manual && r.condition === "N" && (r.avgSold != null || r.avgStock != null) && !(mine.get(r.setNo)?.on > r.on)) mine.set(r.setNo, r);
+  const catalog = S.opps.catalog.map((c) => {
+    const r = mine.get(c.setNo);
+    return r && (!c.priceOn || r.on > c.priceOn)
+      ? { ...c, avgSold: r.avgSold, avgStock: r.avgStock, minStock: r.minStock, qtySold: r.qtySold, qtyStock: r.qtyStock, priceOn: r.on } : c;
+  });
+  let list = rankCandidates(catalog, { now: todayIso(), owned, watched });
   const counts = { all: list.length, watched: list.filter((c) => c.watched).length, owned: list.filter((c) => c.owned).length };
   const f = S.oppFilter || "all";
   if (f === "watched") list = list.filter((c) => c.watched);
