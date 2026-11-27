@@ -408,3 +408,20 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .legend { white-space: nowrap; flex-wrap: wrap; row-gap: 2px; }
 .panel .legend { margin: -4px 0 4px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* v0.8.2 : jaune limité au résumé ; courbe et chiffres dans une carte blanche */
+.hero { padding: 16px; margin-bottom: 10px; }
+.hero .big-num { font-size: 36px; }
+.hero-chart { margin-top: 0; }
+.hero-chart .chips.period { flex-wrap: wrap; gap: 4px; row-gap: 6px; margin: 10px 0 0; }
+.hero-chart .chip { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.hero-chart .chip.on { background: var(--hero); border-color: var(--hero); color: var(--yellow); }
+.hero-chart .chips-sep { margin: 4px 2px; }
+.hero-chart .legend { margin-top: 6px; }
+.hero-chart .c-ref { stroke: var(--lego-red); stroke-width: 1.75; opacity: .8; }
+.hero-chart .legend i.lg-ref { border-top: 1.75px dashed var(--lego-red); }
+.hero-chart .hero-grid { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 12px; }
+.hero-chart .hero-grid span { color: var(--muted); }
+.hero-chart .hero-grid em { color: var(--muted); }
+.hero-chart .hero-grid .up { color: var(--up); } .hero-chart .hero-grid .down { color: var(--down); }
+.hero-chart .hero-note { color: var(--muted); }

@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.8.1";
+const VERSION = "0.8.2";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -184,6 +184,8 @@ function viewPortfolio() {
         </div>
         <span class="studs" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       </div>
+    </section>
+    <section class="panel hero-chart">
       ${gainView
         ? lineChart({ main: gainHist.map((h) => ({ on: h.on, value: h.gain })), ref: hasSales ? gainHist.map((h) => ({ on: h.on, value: h.realized })) : null,
             up: (gainHist.at(-1)?.gain ?? 0) >= 0, signed: true, label: "Plus-value du portefeuille (latente et réalisée)", names: ["Plus-value", "dont réalisée"] })
@@ -325,6 +327,8 @@ function viewDetail(p) {
         </div>
         <span class="studs" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       </div>
+    </section>
+    <section class="panel hero-chart">
       ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null,
         retail: set?.rrp && hist.length > 1 ? [{ on: hist[0].on, value: set.rrp * (Number(p.qty) || 1) }, { on: hist.at(-1).on, value: set.rrp * (Number(p.qty) || 1) }] : null,
         up: (pos.gain ?? 0) >= 0, label: "Valeur de la position",
