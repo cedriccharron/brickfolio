@@ -425,3 +425,24 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .hero-chart .hero-grid em { color: var(--muted); }
 .hero-chart .hero-grid .up { color: var(--up); } .hero-chart .hero-grid .down { color: var(--down); }
 .hero-chart .hero-note { color: var(--muted); }
+
+/* Opportunités (v0.9) */
+.opps > ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.opp { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px dashed var(--line); color: inherit; }
+.opps li:first-child .opp { border-top: 0; }
+.opp-rank { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--hero); color: var(--yellow); font: 800 12px/22px var(--round); text-align: center; }
+.opp .thumb { width: 48px; height: 48px; background: var(--tint, #fff); }
+.opp-name { display: block; font-family: var(--round); font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opp-when { display: block; font-size: 12px; font-weight: 700; color: var(--accent); }
+.opp-line { display: block; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.opp-line em { font-style: normal; color: var(--muted); }
+.opp-score { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; font-family: var(--round); line-height: 1; }
+.opp-score strong { font-size: 20px; }
+.opp-score small { font-size: 10px; opacity: .7; margin-top: 2px; }
+.opp-score.hi { background: #dff5e6; color: #0f6b34; box-shadow: 0 3px 0 #b8e3c6; }
+.opp-score.mid { background: #fff1c7; color: #6b4e00; box-shadow: 0 3px 0 #f0dc9c; }
+.opp-score.lo, .opp-score.none { background: var(--surface-2); color: var(--muted); box-shadow: 0 3px 0 var(--line); }
+.opp-help { margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+.opp-help summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.opp-help ul { padding-left: 18px; margin: 6px 0; }
+.opp-help p { margin: 6px 0; }

@@ -17,11 +17,11 @@ const asDataUrl = (file) => new Promise((resolve, reject) => {
 // Petit catalogue pour essayer la recherche sans BrickLink.
 export const DEMO_CATALOG = {
 // Les dates de sortie et de retrait sont simulées (en vrai, elles viennent de Brickset).
-  "75192-1": { name: "Millennium Falcon - UCS (2nd edition)", year: 2017, retail: 799.99, growth: 0.06, theme: "Star Wars", pieces: 7541, launch: "2017-10-01" },
+  "75192-1": { name: "Millennium Falcon - UCS (2nd edition)", year: 2017, retail: 799.99, growth: 0.06, theme: "Star Wars", pieces: 7541, launch: "2017-10-01", exit: "2026-12-31" },
   "10294-1": { name: "Titanic", year: 2021, retail: 629.99, growth: 0.07, theme: "Icons", pieces: 9090, launch: "2021-11-08", exit: "2027-06-30" },
   "21318-1": { name: "Tree House", year: 2019, retail: 199.99, growth: 0.13, theme: "Ideas", pieces: 3036, launch: "2019-08-01", exit: "2021-12-31" },
   "10276-1": { name: "Colosseum", year: 2020, retail: 499.99, growth: 0.05, theme: "Icons", pieces: 9036, launch: "2020-11-27", exit: "2023-12-31" },
-  "75313-1": { name: "AT-AT - UCS", year: 2021, retail: 849.99, growth: -0.02, theme: "Star Wars", pieces: 6785, launch: "2021-11-26" },
+  "75313-1": { name: "AT-AT - UCS", year: 2021, retail: 849.99, growth: -0.02, theme: "Star Wars", pieces: 6785, launch: "2021-11-26", exit: "2027-02-15" },
   "10497-1": { name: "Galaxy Explorer", year: 2022, retail: 99.99, growth: 0.18, theme: "Icons", pieces: 1254, launch: "2022-08-01", exit: "2024-12-31" },
   "10300-1": { name: "Back to the Future Time Machine", year: 2022, retail: 169.99, growth: 0.09, theme: "Icons", pieces: 1872, launch: "2022-04-01", exit: "2025-12-31" },
   "42143-1": { name: "Ferrari Daytona SP3", year: 2022, retail: 399.99, growth: 0.04, theme: "Technic", pieces: 3778, launch: "2022-06-01", exit: "2025-12-31" },

@@ -328,3 +328,55 @@ export function refreshSummary(r) {
   }
   return { text: lines.join("\n"), error: !!r?.failed || bsError || r?.bricklink === false };
 }
+
+// ---------- Opportunités : sets détenus qui seront retirés bientôt -------------------------
+// Uniquement des faits mesurés aujourd'hui (pas de prédiction) :
+//  - prix d'entrée = le moins cher entre le prix LEGO d'origine et l'annonce BrickLink la moins chère ;
+//  - marché = prix moyen vendu sur 6 mois (sinon moyenne des annonces) ;
+//  - écart = (marché − entrée) / entrée : ce qu'on gagnerait en achetant aujourd'hui au prix d'entrée et en revendant au marché ;
+//  - prime = marché / prix LEGO − 1 : le set se revend-il déjà au-dessus de son prix d'origine ?
+//  - tension = ventes 6 mois / annonces en ligne : beaucoup de ventes pour peu de stock = rareté qui s'installe.
+// Note sur 100 : écart 45 pts, prime 25 pts, tension 30 pts.
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+export function opportunityScore({ edge, premium, tension }) {
+  const parts = {
+    edge: edge == null ? null : clamp01((edge + 0.2) / 0.8) * 45, // −20 % → 0, +60 % → 45
+    premium: premium == null ? null : clamp01((premium + 0.2) / 0.7) * 25, // −20 % → 0, +50 % → 25
+    tension: tension == null ? null : clamp01(tension / (tension + 1)) * 30, // 1 vente par annonce → 15
+  };
+  if (parts.edge == null) return { score: null, parts };
+  return { score: Math.round((parts.edge ?? 0) + (parts.premium ?? 0) + (parts.tension ?? 0)), parts };
+}
+
+export function opportunities(purchases, prices, sets = {}, now = today(), days = 91) {
+  const limit = addDays(now, days);
+  const held = new Map(); // un set peut être détenu en plusieurs achats / états : le neuf d'abord
+  for (const p of purchases) {
+    if (isSold(p)) continue;
+    const cur = held.get(p.setNo);
+    if (!cur) held.set(p.setNo, { setNo: p.setNo, condition: p.condition, boxes: Number(p.qty) || 0 });
+    else { cur.boxes += Number(p.qty) || 0; if (p.condition === "N") cur.condition = "N"; }
+  }
+  const out = [];
+  for (const h of held.values()) {
+    const set = sets[h.setNo];
+    const exit = set?.exitDate;
+    if (!exit || exit < now || exit > limit) continue;
+    const row = [...pricesFor(prices, h.setNo, h.condition)].reverse().find((r) => !r.manual) || null;
+    const rrp = set.rrp > 0 ? Number(set.rrp) : null;
+    const minStock = row?.minStock > 0 ? Number(row.minStock) : null;
+    const market = row ? (row.avgSold ?? row.avgStock ?? null) : null;
+    const entryOpts = [rrp && { price: rrp, from: "LEGO" }, minStock && { price: minStock, from: "BrickLink" }].filter(Boolean);
+    const entry = entryOpts.length ? entryOpts.reduce((a, b) => (b.price < a.price ? b : a)) : null;
+    const edge = entry && market != null ? (market - entry.price) / entry.price : null;
+    const premium = rrp && market != null ? market / rrp - 1 : null;
+    const tension = row?.qtySold != null && row?.qtyStock != null ? row.qtySold / Math.max(1, row.qtyStock) : null;
+    const { score, parts } = opportunityScore({ edge, premium, tension });
+    const daysLeft = Math.round((new Date(`${exit}T12:00:00Z`) - new Date(`${now}T12:00:00Z`)) / 86400000);
+    out.push({ setNo: h.setNo, condition: h.condition, boxes: h.boxes, exitDate: exit, daysLeft, rrp, market,
+      entry: entry?.price ?? null, entryFrom: entry?.from ?? null, edge, premium, tension,
+      qtySold: row?.qtySold ?? null, qtyStock: row?.qtyStock ?? null, margin: entry && market != null ? market - entry.price : null,
+      score, parts, priceOn: row?.on ?? null });
+  }
+  return out.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.daysLeft - b.daysLeft);
+}

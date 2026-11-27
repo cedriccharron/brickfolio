@@ -7,10 +7,10 @@ import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmo
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
-  setStatus, vsRetail, refreshSummary,
+  setStatus, vsRetail, refreshSummary, opportunities,
 } from "./invest.js";
 
-const VERSION = "0.8.2";
+const VERSION = "0.9.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -205,6 +205,8 @@ function viewPortfolio() {
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
 
+    ${opportunityPanel(purchases, prices)}
+
     <div class="seg view-seg" role="tablist">
       ${[["held", `En stock (${counts.held})`], ["sold", `Vendus (${counts.sold})`], ["all", "Tout"]]
         .map(([k, l]) => `<button data-action="filter" data-v="${k}" class="${S.filter === k ? "on" : ""}">${l}</button>`).join("")}
@@ -235,6 +237,41 @@ function viewPortfolio() {
     </div>
     <ul class="positions grid">${rows.map(rowHtml).join("") || `<li class="muted center pad">Aucun achat ne correspond${nf ? ` aux filtres. <button class="link" data-action="reset-filters">Effacer les filtres</button>` : "."}</li>`}</ul>
     <a class="fab" href="#/p/new" aria-label="Ajouter un achat">${icon("plus", 28)}</a>`;
+}
+
+// Opportunités : mes sets retirés dans les 3 mois, classés par note (faits mesurés aujourd'hui).
+function opportunityPanel(purchases, prices) {
+  const list = opportunities(purchases, prices, S.data.sets, todayIso());
+  if (!list.length) return "";
+  const pid = (no) => purchases.find((p) => p.setNo === no && !isSold(p))?.id;
+  const nameOf = (no) => setOf(no)?.name || purchases.find((p) => p.setNo === no)?.name || no;
+  const level = (sc) => (sc == null ? "none" : sc >= 60 ? "hi" : sc >= 35 ? "mid" : "lo");
+  const item = (o, i) => `<li><a class="opp" href="#/p/${pid(o.setNo)}">
+      <span class="opp-rank">${i + 1}</span>
+      ${thumb(o.setNo)}
+      <span class="grow">
+        <strong class="opp-name">${esc(nameOf(o.setNo))}</strong>
+        <span class="opp-when">Retrait le ${fmtDate(o.exitDate)} · ${o.daysLeft <= 0 ? "aujourd'hui" : `dans ${o.daysLeft} j`}</span>
+        ${o.score == null
+          ? `<span class="opp-line muted">En attente d'un relevé BrickLink</span>`
+          : `<span class="opp-line">Entrée ${fmtEur(o.entry)} <em>(${o.entryFrom})</em> → marché ${fmtEur(o.market)} <b class="${tone(o.margin)}">${fmtSigned(o.margin)}</b></span>
+             <span class="opp-line muted">Prix LEGO ${o.premium != null ? `<b class="${tone(o.premium)}">${fmtPct(o.premium)}</b>` : "—"} · ${o.qtySold ?? "?"} ventes / ${o.qtyStock ?? "?"} annonces</span>`}
+      </span>
+      <span class="opp-score ${level(o.score)}"><strong>${o.score ?? "—"}</strong><small>/100</small></span>
+    </a></li>`;
+  return `<section class="panel opps">
+    <div class="panel-head"><h2>${icon("trend", 18)} Opportunités</h2><span class="muted small">retrait dans 3 mois</span></div>
+    <ul>${list.map(item).join("")}</ul>
+    <details class="opp-help"><summary>Comment la note est calculée</summary>
+      <p>Uniquement des faits mesurés aujourd'hui, pas une prédiction :</p>
+      <ul>
+        <li><b>Écart (45 pts)</b> : marché (moyenne des ventes BrickLink sur 6 mois) comparé au prix d'entrée, le moins cher entre le prix LEGO et l'annonce BrickLink la moins chère.</li>
+        <li><b>Prime sur le prix LEGO (25 pts)</b> : le set se revend-il déjà au-dessus de son prix d'origine ?</li>
+        <li><b>Tension (30 pts)</b> : ventes sur 6 mois par annonce en ligne. Beaucoup de ventes pour peu de stock, c'est la rareté qui s'installe.</li>
+      </ul>
+      <p>Les promos en boutique ne sont pas prises en compte. Les dates de retrait viennent de Brickset et sont souvent repoussées.</p>
+    </details>
+  </section>`;
 }
 
 // Potentiel du stock affiché (après filtres)
