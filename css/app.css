@@ -323,3 +323,7 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .icon-btn[aria-busy="true"] { opacity: 1; cursor: progress; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.5s; } }
+
+/* Graphique de plus-value : ligne du zéro, séparateur Plus-value/Valeur | période */
+.c-grid.c-zero { stroke: var(--ink-2); stroke-width: 1.2; opacity: .55; }
+.chips-sep { width: 1px; background: var(--line); margin: 3px 4px; align-self: stretch; }

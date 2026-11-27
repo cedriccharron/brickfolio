@@ -107,15 +107,18 @@ export function positionHistory(p, prices) {
 
 // Historique du portefeuille (boîtes détenues à chaque date de relevé) : valeur et montant investi.
 // retail : prix LEGO d'origine (Brickset) des boîtes détenues ce jour-là ; null si une boîte n'en a pas.
+// realized : plus-value des ventes faites jusqu'à ce jour ; gain = plus-value latente (value − invested) + realized.
 export function portfolioHistory(purchases, prices, sets = {}) {
-  const dates = [...new Set([...prices.map((r) => r.on), ...purchases.map((p) => p.date)])].sort();
+  const sales = purchases.filter((p) => isSold(p) && p.soldDate).map((p) => p.soldDate);
+  const dates = [...new Set([...prices.map((r) => r.on), ...purchases.map((p) => p.date), ...sales])].sort();
   const first = purchases.reduce((m, p) => (!m || p.date < m ? p.date : m), null);
   const out = [];
   for (const d of dates) {
     if (!first || d < first) continue;
-    let value = 0, invested = 0, held = 0, retail = 0;
+    let value = 0, invested = 0, held = 0, retail = 0, realized = 0, sold = 0;
     for (const p of purchases) {
-      if (p.date > d || (isSold(p) && p.soldDate && p.soldDate <= d)) continue;
+      if (p.date > d) continue;
+      if (isSold(p) && p.soldDate && p.soldDate <= d) { realized += Number(p.soldPrice) - cost(p); sold += 1; continue; }
       held += 1;
       const rrp = sets[p.setNo]?.rrp;
       retail = retail != null && rrp > 0 ? retail + rrp * (Number(p.qty) || 0) : null;
@@ -124,7 +127,8 @@ export function portfolioHistory(purchases, prices, sets = {}) {
       const u = unitValue(latestPrice(prices, p.setNo, p.condition, d));
       value += u == null ? c : u * (Number(p.qty) || 0);
     }
-    if (held) out.push({ on: d, value, invested, retail });
+    if (!held) retail = null;
+    if (held || sold) out.push({ on: d, value, invested, retail, realized, gain: value - invested + realized });
   }
   return out;
 }

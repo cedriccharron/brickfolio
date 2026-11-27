@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.6.4";
+const VERSION = "0.7.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -154,6 +154,12 @@ function viewPortfolio() {
   if (PERIODS[period][1]) hist = hist.filter((h) => h.on >= cutoff(PERIODS[period][1]));
   // Prix LEGO d'origine du stock : affiché seulement si toutes les boîtes en ont un (sinon la comparaison tromperait)
   const retail = hist.length && hist.every((h) => h.retail != null) ? hist.map((h) => ({ on: h.on, value: h.retail })) : null;
+  const chartView = S.f.chart === "value" ? "value" : "gain"; // plus-value par défaut
+  const gainView = chartView === "gain";
+  // Avant le premier relevé de prix, la plus-value latente est inconnue (pas nulle) : la courbe commence au premier prix connu.
+  const firstPrice = prices.reduce((m, r) => (!m || r.on < m ? r.on : m), null);
+  const gainHist = firstPrice ? hist.filter((h) => h.on >= firstPrice) : [];
+  const hasSales = gainHist.some((h) => h.realized);
   const rows = viewRows(all);
   const st = stats(rows);
   const counts = { held: all.filter((r) => !r.pos.sold).length, sold: all.filter((r) => r.pos.sold).length };
@@ -180,10 +186,17 @@ function viewPortfolio() {
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
     <section class="panel">
-      <div class="panel-head"><h2>Évolution passée</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi${retail ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span></div>
-      <div class="chips period">${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
-      ${lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), retail, up: gain >= 0, label: "Valeur du portefeuille" })}
-      <p class="muted tiny chart-hint">Glisse le doigt sur la courbe pour lire la valeur à une date. La courbe commence à ton premier achat ; la valeur du marché n'est connue qu'à partir du premier relevé de prix.</p>
+      <div class="panel-head"><h2>Évolution passée</h2>${gainView
+        ? `<span class="legend"><i class="lg-line"></i>Plus-value totale${hasSales ? ` <i class="lg-ref"></i>dont réalisée` : ""}</span>`
+        : `<span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi${retail ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span>`}</div>
+      <div class="chips period">${[["gain", "Plus-value"], ["value", "Valeur"]].map(([k, l]) => `<button class="chip ${chartView === k ? "on" : ""}" data-action="chart-view" data-v="${k}">${l}</button>`).join("")}<span class="chips-sep"></span>${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
+      ${gainView
+        ? lineChart({ main: gainHist.map((h) => ({ on: h.on, value: h.gain })), ref: hasSales ? gainHist.map((h) => ({ on: h.on, value: h.realized })) : null,
+            up: (gainHist.at(-1)?.gain ?? 0) >= 0, signed: true, label: "Plus-value du portefeuille (latente et réalisée)", names: ["Plus-value", "dont réalisée"] })
+        : lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), retail, up: gain >= 0, label: "Valeur du portefeuille" })}
+      <p class="muted tiny chart-hint">${gainView
+        ? `Plus-value totale = plus-value latente (valeur du stock − prix payé) + plus-value réalisée sur les ventes.${hasSales ? " Les pointillés montrent la part déjà réalisée." : ""} Glisse le doigt sur la courbe pour lire une date.`
+        : "Glisse le doigt sur la courbe pour lire la valeur à une date. La courbe commence à ton premier achat ; la valeur du marché n'est connue qu'à partir du premier relevé de prix."}</p>
     </section>
 
     <div class="seg view-seg" role="tablist">
@@ -831,6 +844,7 @@ document.addEventListener("click", async (e) => {
   const a = el.dataset.action;
   if (a === "filter") { S.filter = el.dataset.v; render(); }
   else if (a === "period") { S.f.period = el.dataset.v; saveFilters(); render(); }
+  else if (a === "chart-view") { S.f.chart = el.dataset.v; saveFilters(); render(); }
   else if (a === "reverse") { S.f.reverse = !S.f.reverse; saveFilters(); render(); }
   else if (a === "reset-filters") { e.preventDefault(); for (const k of FILTER_KEYS) delete S.f[k]; saveFilters(); render(); }
   else if (a === "refresh") refreshPrices();

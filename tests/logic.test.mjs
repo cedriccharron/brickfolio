@@ -82,10 +82,10 @@ await test("historique du portefeuille", () => {
   const prices = [R("2023-02-01", 520), R("2023-04-01", 540)];
   const h = portfolioHistory(purchases, prices);
   assert.deepEqual(h, [
-    { on: "2023-01-01", value: 500, invested: 500, retail: null },
-    { on: "2023-02-01", value: 520, invested: 500, retail: null },
-    { on: "2023-03-01", value: 1040, invested: 800, retail: null },
-    { on: "2023-04-01", value: 1080, invested: 800, retail: null },
+    { on: "2023-01-01", value: 500, invested: 500, retail: null, realized: 0, gain: 0 },
+    { on: "2023-02-01", value: 520, invested: 500, retail: null, realized: 0, gain: 20 },
+    { on: "2023-03-01", value: 1040, invested: 800, retail: null, realized: 0, gain: 240 },
+    { on: "2023-04-01", value: 1080, invested: 800, retail: null, realized: 0, gain: 280 },
   ]);
 });
 
@@ -338,6 +338,18 @@ await test("historique : prix LEGO d'origine du stock", () => {
   const partial = portfolioHistory(ps, pr, { "10294-1": { rrp: 629.99 } });
   assert.equal(partial.at(-1).retail, null); // une boîte sans prix d'origine : pas de total
   assert.equal(portfolioHistory(ps, pr)[0].retail, null);
+});
+
+await test("historique : plus-value latente et réalisée", () => {
+  const ps = [P({ id: "a", date: "2023-01-01", soldPrice: 650, soldDate: "2023-03-15" }), P({ id: "b", setNo: "21318-1", unitPrice: 200, date: "2023-02-01" })];
+  const pr = [R("2023-02-01", 560), { ...R("2023-04-01", 180), setNo: "21318-1" }];
+  const h = portfolioHistory(ps, pr);
+  const at = (on) => h.find((x) => x.on === on);
+  assert.equal(at("2023-02-01").gain, 60); // 560 − 500 latent, 21318 sans prix = coût
+  assert.deepEqual([at("2023-03-15").realized, at("2023-03-15").gain, at("2023-03-15").invested], [150, 150, 200]); // vente : latent → réalisé
+  assert.deepEqual([at("2023-04-01").realized, at("2023-04-01").gain], [150, 130]);
+  const all = portfolioHistory([ps[0]], pr);
+  assert.deepEqual(all.at(-1), { on: "2023-04-01", value: 0, invested: 0, retail: null, realized: 150, gain: 150 }); // tout vendu : reste la plus-value réalisée
 });
 
 await test("message de fin de relevé : BrickLink et Brickset", () => {

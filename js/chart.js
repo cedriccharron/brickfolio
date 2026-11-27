@@ -1,5 +1,5 @@
 // Graphique en ligne (SVG) : valeur dans le temps, avec ligne « investi » en pointillés.
-import { esc, fmtEur, fmtDate } from "./util.js";
+import { esc, fmtEur, fmtSigned, fmtDate } from "./util.js";
 
 const W = 340, H = 180, L = 46, R = 10, T = 12, B = 24;
 const t = (iso) => new Date(iso + "T12:00:00").getTime();
@@ -17,7 +17,8 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 // main = [{on, value}] (ligne pleine + aire) ; ref = [{on, value}] (pointillés, en escalier) ;
 // marks = [{on, text}] (repères verticaux, ex. date d'achat) ; names = libellés de la bulle au doigt ;
 // retail = [{on, value}] (prix LEGO d'origine, pointillés fins en escalier, nommé par names[2]).
-export function lineChart({ main, ref = null, retail = null, up = true, label = "Évolution de la valeur", marks = [], names = ["Valeur", "Investi", "Prix LEGO"] }) {
+// signed : montants qui peuvent être négatifs (plus-value) — axe autour de zéro, ligne du zéro marquée, valeurs signées.
+export function lineChart({ main, ref = null, retail = null, up = true, label = "Évolution de la valeur", marks = [], names = ["Valeur", "Investi", "Prix LEGO"], signed = false }) {
   const pts = main.filter((p) => p.value != null);
   if (new Set(pts.map((p) => p.on)).size < 2) return `<div class="chart-empty">Pas encore assez de relevés pour tracer une courbe.<br>Le prochain relevé hebdomadaire complétera le graphique.</div>`;
   const refPts = (ref || []).filter((p) => p.value != null);
@@ -25,8 +26,10 @@ export function lineChart({ main, ref = null, retail = null, up = true, label = 
   const all = [...pts, ...refPts, ...retailPts];
   const x0 = Math.min(...all.map((p) => t(p.on))), x1 = Math.max(...all.map((p) => t(p.on)));
   let y0 = Math.min(...all.map((p) => p.value)), y1 = Math.max(...all.map((p) => p.value));
-  const step = niceStep(Math.max(y1 - y0, y1 * 0.05));
-  y0 = Math.max(0, Math.floor(y0 / step) * step); y1 = Math.ceil(y1 / step) * step;
+  if (signed) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
+  const step = niceStep(Math.max(y1 - y0, Math.abs(y1) * 0.05, signed ? 10 : 0));
+  y0 = signed ? Math.floor(y0 / step) * step : Math.max(0, Math.floor(y0 / step) * step); y1 = Math.ceil(y1 / step) * step;
+  const fmt = signed ? fmtSigned : fmtEur;
   if (y1 === y0) y1 = y0 + step;
   const X = (iso) => L + ((t(iso) - x0) / Math.max(1, x1 - x0)) * (W - L - R);
   const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
@@ -36,8 +39,8 @@ export function lineChart({ main, ref = null, retail = null, up = true, label = 
 
   const grid = [];
   for (let v = y0; v <= y1 + 1e-6; v += step) {
-    grid.push(`<line class="c-grid" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>
-      <text class="c-lbl" x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${esc(fmtEur(v).replace(/\s?€/, "").trim())}</text>`);
+    grid.push(`<line class="c-grid${signed && Math.abs(v) < 1e-6 ? " c-zero" : ""}" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>
+      <text class="c-lbl" x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${esc(fmt(v).replace(/\s?€/, "").trim())}</text>`);
   }
   // Axe du temps : début, repères intermédiaires et fin (« auj. » si c'est aujourd'hui), toujours avec l'année
   const first = new Date(x0).toISOString().slice(0, 10), last = new Date(x1).toISOString().slice(0, 10);
@@ -56,7 +59,8 @@ export function lineChart({ main, ref = null, retail = null, up = true, label = 
     `<line class="c-mark" x1="${X(m.on)}" x2="${X(m.on)}" y1="${T}" y2="${H - B}"/><text class="c-lbl c-mark-lbl" x="${X(m.on) + 3}" y="${T + 9}">${esc(m.text)}</text>`).join("");
 
   const end = pts.at(-1);
-  const area = `${path(pts)}L${X(end.on).toFixed(1)},${Y(y0)}L${X(pts[0].on).toFixed(1)},${Y(y0)}Z`;
+  const base = signed ? 0 : y0; // aire jusqu'au zéro pour une plus-value
+  const area = `${path(pts)}L${X(end.on).toFixed(1)},${Y(base)}L${X(pts[0].on).toFixed(1)},${Y(base)}Z`;
   const cls = up ? "up" : "down";
   // Points pour la lecture au doigt : x, y, date, valeur, valeur de référence à cette date
   const at = (arr, on) => { let v = null; for (const r of arr) if (r.on <= on) v = r.value; return v; };
@@ -64,8 +68,8 @@ export function lineChart({ main, ref = null, retail = null, up = true, label = 
     refPts.length ? at(refPts, p.on) : null, retailPts.length ? at(retailPts, p.on) : null]);
   const lines = 1 + (refPts.length ? 1 : 0) + (retailPts.length ? 1 : 0);
 
-  return `<svg class="chart ${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}, du ${esc(fmtDate(first))} au ${esc(fmtDate(last))} : de ${esc(fmtEur(pts[0].value))} à ${esc(fmtEur(end.value))}"
-      data-pts='${esc(JSON.stringify(data))}' data-names='${esc(JSON.stringify(names))}'>
+  return `<svg class="chart ${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}, du ${esc(fmtDate(first))} au ${esc(fmtDate(last))} : de ${esc(fmt(pts[0].value))} à ${esc(fmt(end.value))}"
+      data-pts='${esc(JSON.stringify(data))}' data-names='${esc(JSON.stringify(names))}'${signed ? ' data-signed="1"' : ""}>
     ${grid.join("")}
     ${axis}
     ${markers}
@@ -102,9 +106,10 @@ function onPointer(e) {
   const line = g.querySelector(".c-hline"); line.setAttribute("x1", px); line.setAttribute("x2", px);
   const dot = g.querySelector(".c-hdot"); dot.setAttribute("cx", px); dot.setAttribute("cy", py);
   const t1 = g.querySelector(".c-tip-t"), t2 = g.querySelector(".c-tip-t2"), t3 = g.querySelector(".c-tip-t3");
-  t1.textContent = `${fmtDate(on)} · ${mainName} ${fmtEur(value)}`;
-  t2.textContent = refV != null ? `${refName} ${fmtEur(refV)}` : "";
-  t3.textContent = retailV != null ? `${retailName} ${fmtEur(retailV)}` : "";
+  const fmt = svg.dataset.signed ? fmtSigned : fmtEur;
+  t1.textContent = `${fmtDate(on)} · ${mainName} ${fmt(value)}`;
+  t2.textContent = refV != null ? `${refName} ${fmt(refV)}` : "";
+  t3.textContent = retailV != null ? `${retailName} ${fmt(retailV)}` : "";
   const w = Math.max(t1.getComputedTextLength?.() || 120, t2.getComputedTextLength?.() || 0, t3.getComputedTextLength?.() || 0) + 14;
   const left = Math.min(Math.max(px - w / 2, 2), W - w - 2);
   const rect = g.querySelector(".c-tip"); rect.setAttribute("x", left); rect.setAttribute("width", w);
