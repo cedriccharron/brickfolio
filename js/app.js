@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
 } from "./invest.js";
 
-const VERSION = "0.10.2";
+const VERSION = "0.10.3";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -239,6 +239,9 @@ function viewPortfolio() {
 }
 
 // ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ---------------
+// Recherche Google Shopping du set (numéro sans variante + nom) pour comparer les prix en boutique.
+const priceSearchUrl = (c) => `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(`LEGO ${c.setNo.replace(/-1$/, "")} ${c.name || ""}`.trim())}`;
+
 async function loadOpps() {
   if (S.oppsLoading) return;
   S.oppsLoading = true;
@@ -316,6 +319,7 @@ function viewOpps() {
         <div class="opp-actions">
           <button class="btn ghost small" data-action="opp-watch" data-v="${esc(c.setNo)}">${c.watched ? "★ Ne plus surveiller" : "☆ Surveiller"}</button>
           <a class="btn primary small" href="${buy}">${icon("plus", 16)} Je l'achète</a>
+          <a class="btn ghost small" href="${priceSearchUrl(c)}" target="_blank" rel="noopener">${icon("search", 16)} Prix sur Google ↗</a>
           <a class="btn ghost small" href="${blUrl(c.setNo)}" target="_blank" rel="noopener">BrickLink ↗</a>
           ${c.bricksetUrl ? `<a class="btn ghost small" href="${esc(c.bricksetUrl)}" target="_blank" rel="noopener">Brickset ↗</a>` : ""}
         </div>
