@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA, parseAdvice, advicePrompt,
 } from "./invest.js";
 
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -389,7 +389,8 @@ function viewOpps() {
         <ul class="crit">${c.parts.map((p) => `<li class="${p.points == null ? "unknown" : ""}">
           <span class="crit-l">${esc(p.label)}<small>${esc(p.detail)}</small></span>
           <span class="crit-bar"><i style="width:${p.value == null ? 0 : Math.round(p.value * 100)}%"></i></span>
-          <span class="crit-p">${p.points == null ? "—" : String(p.points).replace(".", ",")}<small>/${p.max}</small></span></li>`).join("")}</ul>
+          <span class="crit-p">${p.points == null ? "—" : String(p.points).replace(".", ",")}<small>/${p.max}</small></span></li>`).join("")}
+          ${c.cap != null ? `<li class="cap"><span class="crit-l">Petit set<small>prix LEGO ${fmtEur(c.rrp)} : note plafonnée</small></span><span></span><span class="crit-p">≤ ${c.cap}</span></li>` : ""}</ul>
         ${adviceBlock(c)}
         <div class="opp-actions">
           <button class="btn ghost small" data-action="opp-watch" data-v="${esc(c.setNo)}">${c.watched ? "★ Ne plus surveiller" : "☆ Surveiller"}</button>
@@ -418,14 +419,14 @@ function viewOpps() {
     <details class="panel opp-help"><summary>Comment la note est calculée</summary>
       <p>Uniquement des faits mesurés aujourd'hui, pas une prédiction. Chaque critère donne des points :</p>
       <ul>
-        <li><b>Gamme (15)</b> : réputation de la gamme chez les collectionneurs (Star Wars UCS, modulaires, Icons, Ideas en tête ; City, Friends, Duplo en bas).</li>
-        <li><b>Exclusivité (10)</b> : vendu seulement chez LEGO = plus rare après le retrait.</li>
-        <li><b>Minifigs (10)</b> : figurines pour 100 € (elles se revendent à part).</li>
-        <li><b>Prix par pièce (5)</b> et <b>gamme de prix (5)</b> : un set généreux, entre 80 et 500 €, se revend mieux.</li>
-        <li><b>Durée de vente (5)</b> : peu de temps en rayon = moins de boîtes en circulation.</li>
-        <li><b>Envie des collectionneurs (15)</b> : membres Brickset qui le veulent par rapport à ceux qui l'ont, et note des avis.</li>
-        <li><b>Prime (15)</b> et <b>tension (15)</b> : se revend-il déjà au-dessus du prix LEGO sur BrickLink ? Beaucoup de ventes pour peu d'annonces ?</li>
-        <li><b>Délai (5)</b> : un retrait proche est plus sûr (Brickset repousse souvent les dates).</li>
+        <li><b>Taille du set (20)</b> : prix LEGO et nombre de pièces ; les méga sets (400 € ou 4 000 pièces et plus) au maximum.</li>
+        <li><b>Exclusivité LEGO (15)</b> : vendu seulement chez LEGO = plus rare après le retrait.</li>
+        <li><b>Gamme / licence (15)</b> : Star Wars UCS, modulaires, Icons, Ideas, Harry Potter en tête ; City, Friends, Duplo en bas.</li>
+        <li><b>Set pour adultes (10)</b> : 18+ d'après Brickset (les collectionneurs adultes font monter les prix).</li>
+        <li><b>Envie des collectionneurs (10)</b> : membres Brickset qui le veulent par rapport à ceux qui l'ont, et note des avis.</li>
+        <li><b>Prime (10)</b> et <b>tension (10)</b> : se revend-il déjà au-dessus du prix LEGO sur BrickLink ? Beaucoup de ventes pour peu d'annonces ?</li>
+        <li><b>Minifigs (5)</b>, <b>durée de vente (3)</b>, <b>délai avant retrait (2)</b>.</li>
+        <li><b>Petits sets plafonnés</b> : sous 60 € de prix LEGO, la note ne dépasse pas 45 ; sous 100 €, pas 65.</li>
       </ul>
       <p>Note « provisoire » : il manque des données (souvent le prix BrickLink, relevé au fil des jours) ; chaque critère inconnu compte pour moitié de ses points. Le catalogue est parcouru chaque semaine, les prix BrickLink chaque jour par lots. Les promos en boutique ne sont pas prises en compte.</p>
     </details>`;

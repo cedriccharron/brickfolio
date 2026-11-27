@@ -343,18 +343,22 @@ export const THEME_REPUTATION = {
 };
 const SUBTHEME_BONUS = { "Ultimate Collector Series": 1, "Modular Buildings": 1, "Master Builder Series": 0.95 };
 const THEME_DEFAULT = 0.4;
+// Grille v0.13 (demandée par Cédric, proche de ce que regardent les collectionneurs-investisseurs) :
+// les grands sets, les exclusivités LEGO et les sets pour adultes pèsent lourd ; les petits sets sont plafonnés.
 export const CRITERIA = [
-  { key: "theme", label: "Gamme", max: 15 },
-  { key: "exclusive", label: "Exclusivité", max: 10 },
-  { key: "minifigs", label: "Minifigs", max: 10 },
-  { key: "ppp", label: "Prix par pièce", max: 5 },
-  { key: "band", label: "Gamme de prix", max: 5 },
-  { key: "shelf", label: "Durée de vente", max: 5 },
-  { key: "desire", label: "Envie des collectionneurs", max: 15 },
-  { key: "premium", label: "Prime sur le prix LEGO", max: 15 },
-  { key: "tension", label: "Tension du marché", max: 15 },
-  { key: "timing", label: "Délai avant retrait", max: 5 },
+  { key: "size", label: "Taille du set", max: 20 },
+  { key: "exclusive", label: "Exclusivité LEGO", max: 15 },
+  { key: "theme", label: "Gamme / licence", max: 15 },
+  { key: "adult", label: "Set pour adultes (18+)", max: 10 },
+  { key: "desire", label: "Envie des collectionneurs", max: 10 },
+  { key: "premium", label: "Prime sur le prix LEGO", max: 10 },
+  { key: "tension", label: "Tension du marché", max: 10 },
+  { key: "minifigs", label: "Minifigs", max: 5 },
+  { key: "shelf", label: "Durée de vente", max: 3 },
+  { key: "timing", label: "Délai avant retrait", max: 2 },
 ];
+const SMALL_CAP = [[60, 45], [100, 65]]; // prix LEGO sous 60 € : note plafonnée à 45 ; sous 100 € : à 65
+const ADULT_THEMES = /^(Icons|Creator Expert|Architecture|Art|Botanical Collection|Botanicals|Ideas)$/i;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const lin = (x, a, b) => clamp01((x - a) / (b - a)); // 0 en a, 1 en b (a > b possible : décroissant)
 const pctTxt = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(Math.round(x * 100))} %`;
@@ -365,21 +369,24 @@ export function candidateScore(c, now = today()) {
   const rrp = c.rrp > 0 ? Number(c.rrp) : null;
   const market = c.avgSold ?? c.avgStock ?? null;
   const v = {}, d = {};
-  // 1. Gamme (sous-gamme UCS / modulaires prioritaire)
+  // 1. Taille : le plus favorable entre le prix LEGO et le nombre de pièces (les « méga sets » en tête)
+  const byPrice = rrp == null ? null : rrp >= 400 ? 1 : rrp >= 250 ? 0.85 : rrp >= 150 ? 0.65 : rrp >= 80 ? 0.4 : rrp >= 40 ? 0.15 : 0.05;
+  const byPieces = !c.pieces ? null : c.pieces >= 4000 ? 1 : c.pieces >= 2500 ? 0.8 : c.pieces >= 1500 ? 0.6 : c.pieces >= 800 ? 0.35 : c.pieces >= 300 ? 0.12 : 0.03;
+  if (byPrice != null || byPieces != null) { v.size = Math.max(byPrice ?? 0, byPieces ?? 0); d.size = [rrp ? `prix LEGO ${eur(rrp)}` : "", c.pieces ? `${c.pieces} pièces` : ""].filter(Boolean).join(" · "); }
+  // 2. Exclusivité : vendu seulement chez LEGO = rare après le retrait
+  const av = String(c.availability || "");
+  v.exclusive = /exclusive/i.test(av) ? 1 : /limited/i.test(av) ? 0.8 : /promo/i.test(av) ? 0.6 : av ? 0.15 : null;
+  d.exclusive = av || "inconnue";
+  // 3. Gamme / licence (sous-gamme UCS / modulaires prioritaire)
   const sub = SUBTHEME_BONUS[c.subtheme];
   v.theme = sub ?? THEME_REPUTATION[c.theme] ?? THEME_DEFAULT;
   d.theme = [c.theme, sub ? c.subtheme : ""].filter(Boolean).join(" · ") || "gamme inconnue";
-  // 2. Exclusivité
-  const av = String(c.availability || "");
-  v.exclusive = /exclusive/i.test(av) ? 1 : /limited/i.test(av) ? 0.8 : /promo/i.test(av) ? 0.7 : av ? 0.3 : null;
-  d.exclusive = av || "inconnue";
-  // 3. Minifigs : figurines pour 100 € (4 et plus = maximum)
+  // 4. Set pour adultes : âge minimum Brickset (18+ = maximum) ; à défaut, gammes adultes connues
+  if (c.ageMin != null) { v.adult = c.ageMin >= 18 ? 1 : c.ageMin >= 16 ? 0.6 : c.ageMin >= 12 ? 0.25 : 0; d.adult = `dès ${c.ageMin} ans`; }
+  else if (c.subtheme === "Ultimate Collector Series" || c.subtheme === "Modular Buildings" || ADULT_THEMES.test(c.theme || "")) { v.adult = 0.8; d.adult = "gamme pour adultes (âge non fourni)"; }
+  // 5. Minifigs : figurines pour 100 € (4 et plus = maximum)
   if (rrp && c.minifigs != null) { const f = (c.minifigs * 100) / rrp; v.minifigs = clamp01(f / 4); d.minifigs = `${c.minifigs} figurine${c.minifigs > 1 ? "s" : ""} (${f.toFixed(1).replace(".", ",")} pour 100 €)`; }
   else if (rrp && c.pieces) { v.minifigs = 0; d.minifigs = "aucune"; }
-  // 4. Prix par pièce : 8 centimes ou moins = maximum, 15 centimes ou plus = 0
-  if (rrp && c.pieces) { const ppp = rrp / c.pieces; v.ppp = lin(ppp, 0.15, 0.08); d.ppp = `${(ppp * 100).toFixed(1).replace(".", ",")} centimes par pièce`; }
-  // 5. Gamme de prix : 80 à 500 € idéal
-  if (rrp) { v.band = rrp >= 80 && rrp <= 500 ? 1 : (rrp >= 40 && rrp < 80) || (rrp > 500 && rrp <= 900) ? 0.6 : 0.2; d.band = `prix LEGO ${eur(rrp)}`; }
   // 6. Durée de vente : 18 mois ou moins = maximum, 4 ans ou plus = 0
   if (c.launchDate && c.exitDate) { const m = daysBetween(c.launchDate, c.exitDate) / 30.4; v.shelf = lin(m, 48, 18); d.shelf = `${Math.round(m)} mois en rayon`; }
   // 7. Envie des collectionneurs : membres Brickset qui le veulent / qui l'ont, et note des avis
@@ -400,8 +407,12 @@ export function candidateScore(c, now = today()) {
 
   const parts = CRITERIA.map((k) => ({ ...k, value: v[k.key] ?? null, points: v[k.key] == null ? null : Math.round(v[k.key] * k.max * 10) / 10, detail: d[k.key] || "inconnu" }));
   // Critère inconnu (souvent le prix BrickLink pas encore relevé) : compté pour moitié, ni bonus ni pénalité.
-  const score = Math.round(parts.reduce((a, p) => a + (p.points ?? p.max / 2), 0));
-  return { score, provisional: parts.some((p) => p.points == null), parts, market, premium, daysLeft };
+  let score = Math.round(parts.reduce((a, p) => a + (p.points ?? p.max / 2), 0));
+  // Petits sets : note plafonnée (ils prennent peu de valeur en euros, même s'ils cochent les autres cases)
+  const cap = rrp != null ? SMALL_CAP.find(([lim]) => rrp < lim)?.[1] : null;
+  const capped = cap != null && score > cap ? cap : null;
+  if (capped != null) score = capped;
+  return { score, provisional: parts.some((p) => p.points == null), parts, market, premium, daysLeft, cap: capped };
 }
 
 // Liste classée : catalogue + sets détenus (repérés « à toi ») + surveillés, dans la fenêtre de « days » jours.

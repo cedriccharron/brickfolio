@@ -352,28 +352,35 @@ await test("historique : plus-value latente et réalisée", () => {
   assert.deepEqual(all.at(-1), { on: "2023-04-01", value: 0, invested: 0, retail: null, realized: 150, gain: 150 }); // tout vendu : reste la plus-value réalisée
 });
 
-await test("opportunités : note à 10 critères et classement", () => {
+await test("opportunités : grille (taille, exclusivité, adultes) et classement", () => {
   const now = "2026-11-27";
   const ucs = { setNo: "75192-1", name: "Falcon", theme: "Star Wars", subtheme: "Ultimate Collector Series", availability: "LEGO exclusive",
     minifigs: 8, pieces: 7541, rrp: 849.99, launchDate: "2017-10-01", exitDate: "2026-12-31", wantedBy: 9000, ownedBy: 12000, rating: 4.8,
-    avgSold: 900, qtySold: 40, qtyStock: 20 };
+    avgSold: 1100, qtySold: 40, qtyStock: 20 };
   const s = candidateScore(ucs, now);
   const part = (k) => s.parts.find((p) => p.key === k);
   assert.equal(part("theme").points, 15);
-  assert.equal(part("exclusive").points, 10);
+  assert.equal(part("exclusive").points, 15);
+  assert.equal(part("size").points, 20); // méga set
+  assert.equal(part("adult").points, 8); // âge non fourni, mais UCS
+  assert.equal(candidateScore({ ...ucs, ageMin: 18 }, now).parts.find((p) => p.key === "adult").points, 10);
   assert.equal(part("shelf").points, 0); // 9 ans en rayon
-  assert.equal(part("timing").points, 4.8); // dans 34 j : proche
+  assert.equal(part("timing").points, 1.9); // dans 34 j : proche
   assert.equal(s.daysLeft, 34);
   assert.equal(s.provisional, false);
   assert.ok(s.score > 60 && s.score <= 100);
   const city = { setNo: "60300-1", theme: "City", availability: "Retail", minifigs: 1, pieces: 150, rrp: 29.99,
     launchDate: "2024-01-01", exitDate: "2027-02-20", wantedBy: 50, ownedBy: 900, avgSold: 22, qtySold: 3, qtyStock: 80 };
-  assert.ok(candidateScore(city, now).score < s.score);
+  const cs = candidateScore(city, now);
+  assert.ok(cs.score <= 45 && cs.score < s.score); // petit set : plafonné
+  const smallStar = candidateScore({ ...ucs, rrp: 49.99, pieces: 400, minifigs: 4, availability: "LEGO exclusive" }, now);
+  assert.equal(smallStar.score, 45); // même exclusif et Star Wars : plafond des petits sets
+  assert.equal(smallStar.cap, 45);
   const noPrice = candidateScore({ ...ucs, avgSold: null, avgStock: null, qtySold: null, qtyStock: null }, now);
   assert.equal(noPrice.provisional, true); // prime et tension inconnues : comptées pour moitié
   assert.ok(noPrice.score < s.score);
   const bare = candidateScore({ setNo: "4000351-1", theme: "Editions", availability: "LEGO exclusive", pieces: 2845, exitDate: "2026-12-31", wantedBy: 10, ownedBy: 100 }, now);
-  assert.ok(bare.score < 60, `fiche presque vide : ${bare.score}`); // ne doit plus passer devant les sets connus
+  assert.ok(bare.score < s.score, `fiche presque vide : ${bare.score}`); // ne passe pas devant un set bien connu
   assert.equal(noPrice.parts.find((p) => p.key === "premium").points, null);
   const list = rankCandidates([city, ucs, { ...city, setNo: "40000-1", availability: "LEGO Gift with Purchase" }, { ...city, setNo: "1-1", exitDate: "2027-06-30" }, { ...city, setNo: "2-1", exitDate: "2026-10-01" }],
     { now, owned: new Set(["75192-1"]), watched: new Set(["60300-1"]) });

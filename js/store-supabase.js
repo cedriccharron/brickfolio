@@ -54,7 +54,7 @@ const setFromRow = (r) => ({
 const catalogFromRow = (r) => ({
   setNo: r.set_no, name: r.name, year: r.year, image: r.image_url, theme: r.theme, themeGroup: r.theme_group, subtheme: r.subtheme,
   pieces: r.pieces, minifigs: r.minifigs, rrp: n(r.rrp_eur), launchDate: r.launch_date, exitDate: r.exit_date,
-  availability: r.availability, rating: n(r.rating), reviewCount: r.review_count, ownedBy: r.owned_by, wantedBy: r.wanted_by,
+  availability: r.availability, ageMin: r.age_min ?? null, rating: n(r.rating), reviewCount: r.review_count, ownedBy: r.owned_by, wantedBy: r.wanted_by,
   bricksetUrl: r.brickset_url, seenAt: r.seen_at, priceOn: r.price_on, priceError: r.price_error,
   avgSold: n(r.avg_sold), qtySold: r.qty_sold, avgStock: n(r.avg_stock), minStock: n(r.min_stock), qtyStock: r.qty_stock,
 });

@@ -206,6 +206,7 @@ function parseCatalog(s) {
     theme: b.theme, theme_group: s.themeGroup || null, subtheme: b.subtheme, category: s.category || null,
     pieces: b.pieces, minifigs: b.minifigs, rrp_eur: b.rrp_eur, launch_date: b.launch_date, exit_date: b.exit_date,
     availability: s.availability || null,
+    age_min: posInt(s.ageRange?.min),
     rating: rating > 0 ? Math.round(rating * 10) / 10 : null,
     review_count: num(s.reviewCount),
     owned_by: num(s.collections?.ownedBy),

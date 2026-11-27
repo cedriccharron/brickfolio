@@ -211,6 +211,7 @@ export function createDemoStore() {
       const plus = (d) => { const x = new Date(); x.setDate(x.getDate() + d); return iso(x); };
       const catalog = DEMO_OPPS.map(([setNo, name, theme, subtheme, availability, minifigs, pieces, rrp, launch, inDays, wantedBy, ownedBy, rating, avgSold, qtySold, qtyStock]) => ({
         setNo, name, image: image(setNo), theme, subtheme, availability, minifigs, pieces, rrp, launchDate: launch, exitDate: plus(inDays),
+        ageMin: rrp >= 199 || /Icons|Ideas/.test(theme) ? 18 : 9,
         wantedBy, ownedBy, rating, avgSold, avgStock: avgSold && Math.round(avgSold * 1.08), minStock: avgSold && Math.round(avgSold * 0.93),
         qtySold, qtyStock, priceOn: avgSold ? iso(new Date()) : null, bricksetUrl: `https://brickset.com/sets/${setNo}`, seenAt: new Date().toISOString(),
       }));

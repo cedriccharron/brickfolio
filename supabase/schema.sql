@@ -231,3 +231,6 @@ create policy bf_advice_read on public.bf_advice for select to authenticated usi
 -- v0.12 : l'avis vient de claude.ai (abonnement), collé dans l'app par le propriétaire.
 drop policy if exists bf_advice_write on public.bf_advice;
 create policy bf_advice_write on public.bf_advice for insert to authenticated with check (public.is_owner());
+
+-- v0.13 : âge minimum (Brickset ageRange.min) pour repérer les sets pour adultes (18+).
+alter table public.bf_catalog add column if not exists age_min int;
