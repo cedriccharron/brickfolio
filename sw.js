@@ -1,6 +1,6 @@
 // Service worker : garde l'app disponible sans réseau.
 // Incrémente VERSION à chaque mise en ligne pour forcer la mise à jour.
-const VERSION = "brickfolio-0.7.0";
+const VERSION = "brickfolio-0.8.0";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest", "css/app.css",
   "js/app.js", "js/config.js", "js/util.js", "js/icons.js", "js/chart.js", "js/invest.js", "js/store-demo.js", "js/store-supabase.js", "js/invoice-parse.js", "js/invoice-read.js", "js/vendor/supabase.js",

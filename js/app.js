@@ -2,7 +2,7 @@
 import { CONFIG } from "./config.js";
 import { createDemoStore } from "./store-demo.js";
 import { icon } from "./icons.js";
-import { lineChart, sparkline } from "./chart.js";
+import { lineChart } from "./chart.js";
 import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmount, toast, confirmDialog, download } from "./util.js";
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -133,7 +133,7 @@ function viewRows(rows) {
   return sortRows(filterRows(byStatus, S.f), S.sort, !!S.f.reverse);
 }
 
-const PERIODS = { m3: ["3 derniers mois", 91], y1: ["12 derniers mois", 365], all: ["Depuis le début", null] };
+const PERIODS = { m3: ["3 mois", 91], y1: ["1 an", 365], all: ["Tout", null] };
 const cutoff = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); };
 const pctTag = (x, label = "") => (x == null ? "" : `<span class="trend ${tone(x)}">${x > 0.0005 ? "↗" : x < -0.0005 ? "↘" : "→"} ${fmtPct(x)}${label ? ` <em>${label}</em>` : ""}</span>`);
 const days2txt = (d) => (d == null ? "—" : d < 60 ? `${d} j` : d < 730 ? `${Math.round(d / 30.4)} mois` : `${(d / 365).toFixed(1).replace(".", ",")} ans`);
@@ -160,6 +160,9 @@ function viewPortfolio() {
   const firstPrice = prices.reduce((m, r) => (!m || r.on < m ? r.on : m), null);
   const gainHist = firstPrice ? hist.filter((h) => h.on >= firstPrice) : [];
   const hasSales = gainHist.some((h) => h.realized);
+  const total = gain + g.sold.profit; // plus-value latente + réalisée
+  const totalBase = g.held.invested + (g.sold.cost || 0);
+  const totalPct = totalBase ? total / totalBase : null;
   const rows = viewRows(all);
   const st = stats(rows);
   const counts = { held: all.filter((r) => !r.pos.sold).length, sold: all.filter((r) => r.pos.sold).length };
@@ -172,31 +175,32 @@ function viewPortfolio() {
   return `${top("Portefeuille", { sub: lastRun?.finished_at ? `Prix du ${fmtDate(lastRun.finished_at)}${S.data.offline ? " · hors ligne" : ""}` : "Aucun relevé de prix pour l'instant",
       actions: `<button class="icon-btn" data-action="refresh" aria-label="${S.busy ? "Relevé en cours" : "Mettre à jour les prix"}" ${S.busy ? "disabled aria-busy=\"true\"" : ""}><span class="${S.busy ? "spin" : ""}">${icon("refresh")}</span></button>` })}
     <section class="hero">
-      <span class="kicker">Valeur actuelle du stock</span>
-      <strong class="big-num">${fmtEur(g.held.value)}</strong>
-      <span class="delta ${tone(gain)}">${fmtSigned(gain)} · ${fmtPct(g.held.pct)}</span>
-      <div class="hero-grid">
-        <div><span>Investi</span><strong>${fmtEur(g.held.invested)}</strong></div>
-        <div><span>Plus-value réalisée</span><strong class="${tone(g.sold.profit)}">${fmtSigned(g.sold.profit)}</strong></div>
-        <div><span>Bénéfice total</span><strong class="${tone(gain + g.sold.profit)}">${fmtSigned(gain + g.sold.profit)}</strong></div>
-        <div><span>Tendance 3 mois</span><strong class="${tone(g.held.m3?.pct)}">${fmtPct(g.held.m3?.pct)}</strong></div>
-        <div><span>Tendance 1 an</span><strong class="${tone(g.held.y1?.pct)}">${fmtPct(g.held.y1?.pct)}</strong></div>
-        <div><span>Boîtes en stock</span><strong>${g.held.boxes}</strong></div>
+      <div class="hero-top">
+        <div>
+          <span class="kicker">Plus-value totale</span>
+          <strong class="big-num">${fmtSigned(total)}</strong>
+          <span class="pill ${tone(total)}">${fmtPct(totalPct)}</span>
+          <span class="hero-sub">latente ${fmtSigned(gain)} · réalisée ${fmtSigned(g.sold.profit)}</span>
+        </div>
+        <span class="studs" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       </div>
-      ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h2>Évolution passée</h2>${gainView
-        ? `<span class="legend"><i class="lg-line"></i>Plus-value totale${hasSales ? ` <i class="lg-ref"></i>dont réalisée` : ""}</span>`
-        : `<span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi${retail ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span>`}</div>
-      <div class="chips period">${[["gain", "Plus-value"], ["value", "Valeur"]].map(([k, l]) => `<button class="chip ${chartView === k ? "on" : ""}" data-action="chart-view" data-v="${k}">${l}</button>`).join("")}<span class="chips-sep"></span>${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
       ${gainView
         ? lineChart({ main: gainHist.map((h) => ({ on: h.on, value: h.gain })), ref: hasSales ? gainHist.map((h) => ({ on: h.on, value: h.realized })) : null,
             up: (gainHist.at(-1)?.gain ?? 0) >= 0, signed: true, label: "Plus-value du portefeuille (latente et réalisée)", names: ["Plus-value", "dont réalisée"] })
         : lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), retail, up: gain >= 0, label: "Valeur du portefeuille" })}
-      <p class="muted tiny chart-hint">${gainView
-        ? `Plus-value totale = plus-value latente (valeur du stock − prix payé) + plus-value réalisée sur les ventes.${hasSales ? " Les pointillés montrent la part déjà réalisée." : ""} Glisse le doigt sur la courbe pour lire une date.`
-        : "Glisse le doigt sur la courbe pour lire la valeur à une date. La courbe commence à ton premier achat ; la valeur du marché n'est connue qu'à partir du premier relevé de prix."}</p>
+      <div class="legend">${gainView
+        ? `<i class="lg-line"></i>Plus-value${hasSales ? ` <i class="lg-ref"></i>dont réalisée` : ""}`
+        : `<i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi${retail ? ` <i class="lg-retail"></i>Prix LEGO` : ""}`}</div>
+      <div class="chips period">${[["gain", "Plus-value"], ["value", "Valeur"]].map(([k, l]) => `<button class="chip ${chartView === k ? "on" : ""}" data-action="chart-view" data-v="${k}">${l}</button>`).join("")}<span class="chips-sep"></span>${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
+      <div class="hero-grid">
+        <div><span>Valeur du stock</span><strong>${fmtEur(g.held.value)}</strong></div>
+        <div><span>Investi</span><strong>${fmtEur(g.held.invested)}</strong></div>
+        <div><span>Boîtes</span><strong>${g.held.boxes}</strong></div>
+        <div><span>Tendance 3 mois</span><strong class="${tone(g.held.m3?.pct)}">${fmtPct(g.held.m3?.pct)}</strong></div>
+        <div><span>Tendance 1 an</span><strong class="${tone(g.held.y1?.pct)}">${fmtPct(g.held.y1?.pct)}</strong></div>
+        <div><span>Ventes</span><strong>${g.sold.count}</strong></div>
+      </div>
+      ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
 
     <div class="seg view-seg" role="tablist">
@@ -227,7 +231,7 @@ function viewPortfolio() {
         <button class="icon-btn mini" data-action="reverse" aria-label="Inverser l'ordre" title="Inverser l'ordre">${S.f.reverse ? "↑" : "↓"}</button>
       </div>
     </div>
-    <ul class="positions">${rows.map(rowHtml).join("") || `<li class="muted center pad">Aucun achat ne correspond${nf ? ` aux filtres. <button class="link" data-action="reset-filters">Effacer les filtres</button>` : "."}</li>`}</ul>
+    <ul class="positions grid">${rows.map(rowHtml).join("") || `<li class="muted center pad">Aucun achat ne correspond${nf ? ` aux filtres. <button class="link" data-action="reset-filters">Effacer les filtres</button>` : "."}</li>`}</ul>
     <a class="fab" href="#/p/new" aria-label="Ajouter un achat">${icon("plus", 28)}</a>`;
 }
 
@@ -272,7 +276,6 @@ function panelSold(v, filtered) {
 
 function rowHtml(r) {
   const { p, pos, name, t } = r;
-  const hist = positionHistory(p, S.data.prices);
   // Colonne de droite : selon le tri choisi
   let main = pos.priced ? fmtEur(pos.value) : "—", sub = pos.priced ? `<span class="small ${tone(pos.pct)}">${fmtPct(pos.pct)}</span>` : `<span class="small muted">en attente</span>`;
   if (S.sort === "gain" || S.sort === "pct") { main = `<span class="${tone(pos.gain)}">${fmtSigned(pos.gain)}</span>`; sub = `<span class="small ${tone(pos.pct)}">${fmtPct(pos.pct)}</span>`; }
@@ -281,21 +284,18 @@ function rowHtml(r) {
   if (S.sort === "trend3" || S.sort === "trend12") { const x = S.sort === "trend3" ? t.m3 : t.y1; main = `<span class="${tone(x?.pct)}">${fmtPct(x?.pct)}</span>`; sub = `<span class="small muted">${S.sort === "trend3" ? "3 mois" : "1 an"}</span>`; }
   if (S.sort === "held") { main = days2txt(r.heldDays); sub = `<span class="small muted">${pos.sold ? "détenu" : "en stock"}</span>`; }
   if (pos.sold && !["cagr", "held", "trend3", "trend12"].includes(S.sort)) { main = `<span class="${tone(pos.gain)}">${fmtSigned(pos.gain)}</span>`; sub = `<span class="small muted">vendu ${fmtEur(pos.value)}</span>`; }
-  const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : ""].filter(Boolean).join(" · ")
-    + (r.status === "retired" ? ` <span class="tag retired">retiré</span>` : r.status === "retiring" ? ` <span class="tag retiring">retrait annoncé</span>` : "");
-  const when = [`${icon("calendar", 13)}${fmtDate(p.date)}`, p.shop ? esc(p.shop) : "", pos.sold ? `vendu le ${fmtDate(p.soldDate)}` : ""].filter(Boolean).join(" · ");
-  return `<li><a class="pos" href="#/p/${p.id}">
-    ${thumb(p.setNo)}
-    <span class="grow">
-      <strong class="pos-name">${esc(name)}</strong>
-      <span class="muted small">${info}</span>
-      <span class="muted small when">${when}</span>
-      ${!pos.sold && t.m3 ? `<span class="small">${pctTag(t.m3.pct, "3 mois")}</span>` : ""}
-    </span>
-    ${sparkline(hist, (pos.gain ?? 0) >= 0)}
-    <span class="pos-val"><strong>${main}</strong>${sub}</span>
+  const badge = r.status === "retired" ? `<span class="tag retired">retiré</span>` : r.status === "retiring" ? `<span class="tag retiring">retrait annoncé</span>` : pos.sold ? `<span class="tag sold">vendu</span>` : "";
+  return `<li><a class="card" href="#/p/${p.id}">
+    <span class="card-img" style="--tint:${tint(p.setNo)}">${thumb(p.setNo, "fill")}${badge}</span>
+    <strong class="card-name">${esc(name)}</strong>
+    <span class="card-info">${[esc(p.setNo), p.qty > 1 ? `×${p.qty}` : "", p.condition !== "N" ? CONDITIONS[p.condition] : ""].filter(Boolean).join(" · ")}</span>
+    <span class="card-val"><strong>${main}</strong>${sub}</span>
   </a></li>`;
 }
+
+// Fond pastel de la vignette, stable pour un même set (jaune, bleu, rouge, vert, orange, violet).
+const TINTS = ["#fff4cc", "#e3ecf8", "#fbe4df", "#e2f1e5", "#fde9d4", "#ece6f6"];
+function tint(no) { let h = 0; for (const c of String(no)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return TINTS[h % TINTS.length]; }
 
 // ---------- Détail d'un achat -------------------------------------------------
 function viewDetail(p) {
