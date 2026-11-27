@@ -7,10 +7,10 @@ import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmo
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
-  setStatus, vsRetail,
+  setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.6.1";
+const VERSION = "0.6.2";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -707,8 +707,9 @@ async function refreshPrices(silent = false) {
   try {
     const r = await S.store.refreshPrices();
     await reload();
-    if (r.bricklink === false) { if (!silent) toast(r.message, "info"); } // Brickset seul, BrickLink pas encore branché
-    else toast(r.failed ? `${r.ok} prix relevés, ${r.failed} échec(s)` : silent ? "Prix BrickLink relevé" : `${r.ok} prix relevés`, r.failed ? "error" : "info");
+    const sum = refreshSummary(r);
+    if (!silent) toast(sum.text, sum.error ? "error" : "info");
+    else if (r.bricklink !== false) toast(r.failed ? sum.text : "Prix BrickLink relevé", r.failed ? "error" : "info");
   } catch (e) {
     // Relevé automatique après un nouvel achat : on ne dérange pas si BrickLink n'est pas encore branché.
     if (!silent) toast(e.message, "error");

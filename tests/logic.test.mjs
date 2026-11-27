@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail,
+  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary,
 } from "../js/invest.js";
 import {
   pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset,
@@ -338,6 +338,23 @@ await test("historique : prix LEGO d'origine du stock", () => {
   const partial = portfolioHistory(ps, pr, { "10294-1": { rrp: 629.99 } });
   assert.equal(partial.at(-1).retail, null); // une boîte sans prix d'origine : pas de total
   assert.equal(portfolioHistory(ps, pr)[0].retail, null);
+});
+
+await test("message de fin de relevé : BrickLink et Brickset", () => {
+  const ok = refreshSummary({ ok: 7, failed: 0, skipped: 0, brickset: 0, bricklink: true, message: "7 relevé(s) sur 7. 0 fiche(s) Brickset mise(s) à jour" });
+  assert.equal(ok.text, "✓ BrickLink : 7 prix relevés\n✓ Brickset : fiches LEGO déjà à jour");
+  assert.equal(ok.error, false);
+  const two = refreshSummary({ ok: 1, failed: 0, brickset: 2, bricklink: true, message: "1 relevé(s) sur 1. 2 fiche(s) Brickset mise(s) à jour" });
+  assert.equal(two.text, "✓ BrickLink : 1 prix relevé\n✓ Brickset : 2 fiches LEGO mises à jour");
+  const bad = refreshSummary({ ok: 6, failed: 1, brickset: 0, bricklink: true,
+    message: "6 relevé(s) sur 7. 0 fiche(s) Brickset mise(s) à jour. Brickset : 75397-1 : Brickset : Invalid API key ; 75192-1 : x. Échecs : 10318-1 (N) : y" });
+  assert.equal(bad.text, "✗ BrickLink : 6 prix relevés, 1 échec\n✗ Brickset : erreur (75397-1 : Brickset : Invalid API key)");
+  assert.equal(bad.error, true);
+  const noKeys = refreshSummary({ ok: 0, failed: 0, brickset: 3, bricklink: false, message: "Prix BrickLink : clés absentes. 3 fiche(s) Brickset mise(s) à jour" });
+  assert.equal(noKeys.text, "✗ BrickLink : clés absentes, prix non relevés\n✓ Brickset : 3 fiches LEGO mises à jour");
+  assert.equal(refreshSummary({ ok: 2, failed: 0, brickset: 0, bricklink: true, message: "2 relevé(s) sur 2" }).text,
+    "✓ BrickLink : 2 prix relevés\n✗ Brickset : clé absente, fiches LEGO non vérifiées");
+  assert.equal(refreshSummary({ ok: 3, failed: 0, total: 3, message: "3 relevé(s) simulé(s)" }).text, "✓ BrickLink : 3 prix relevés"); // démo
 });
 
 console.log(`\n${n} tests réussis`);

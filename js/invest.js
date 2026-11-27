@@ -297,3 +297,30 @@ export function toCSV(purchases, prices, sets) {
   });
   return "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");
 }
+
+// Message de fin de relevé : une ligne par source (BrickLink pour les prix, Brickset pour les fiches LEGO).
+// r = réponse de refresh : { ok, failed, skipped, total, message, brickset, bricklink }.
+export function refreshSummary(r) {
+  const s = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+  const msg = String(r?.message || "");
+  let bl;
+  if (r?.bricklink === false) bl = "✗ BrickLink : clés absentes, prix non relevés";
+  else {
+    const parts = [s(r?.ok || 0, "prix relevé", "prix relevés")];
+    if (r?.failed) parts.push(s(r.failed, "échec", "échecs"));
+    if (r?.skipped) parts.push(`${r.skipped} reporté${r.skipped > 1 ? "s" : ""}`);
+    bl = `${r?.failed ? "✗" : "✓"} BrickLink : ${parts.join(", ")}`;
+  }
+  const lines = [bl];
+  let bsError = false;
+  if (r?.brickset != null) { // absent en démo
+    if (!/fiche\(s\) Brickset/.test(msg)) lines.push("✗ Brickset : clé absente, fiches LEGO non vérifiées");
+    else {
+      const err = msg.match(/Brickset : ([^;]+?)(?: ;|\. |$)/);
+      bsError = !!err;
+      const done = r.brickset ? s(r.brickset, "fiche LEGO mise à jour", "fiches LEGO mises à jour") : "fiches LEGO déjà à jour";
+      lines.push(err ? `✗ Brickset : ${r.brickset ? `${done}, ` : ""}erreur (${err[1]})` : `✓ Brickset : ${done}`);
+    }
+  }
+  return { text: lines.join("\n"), error: !!r?.failed || bsError || r?.bricklink === false };
+}

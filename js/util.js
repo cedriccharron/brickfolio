@@ -41,7 +41,7 @@ export function toast(msg, kind = "info") {
   el.textContent = msg;
   el.className = `toast show ${kind}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.className = "toast"), kind === "error" ? 5000 : 2600);
+  toastTimer = setTimeout(() => (el.className = "toast"), kind === "error" ? 6000 : Math.max(2600, String(msg).length * 50));
 }
 
 export function confirmDialog(message, okLabel = "Confirmer", danger = true) {

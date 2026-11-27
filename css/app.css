@@ -199,7 +199,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--hero); outl
 
 /* Messages */
 .toast { position: fixed; left: 50%; bottom: calc(90px + var(--safe-b)); transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
-  background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 14px; font-weight: 600; font-size: 14.5px; transition: .2s; z-index: 30; max-width: 90vw; }
+  background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 14px; font-weight: 600; font-size: 14.5px; transition: .2s; z-index: 30; max-width: 90vw; white-space: pre-line; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { background: var(--down); }
 dialog { border: 0; border-radius: 18px; padding: 0; max-width: 340px; width: calc(100% - 40px); }
