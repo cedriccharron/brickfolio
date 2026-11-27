@@ -205,3 +205,25 @@ create policy bf_catalog_read on public.bf_catalog for select to authenticated u
 drop policy if exists bf_watch_rw on public.bf_watch;
 create policy bf_watch_rw on public.bf_watch for all to authenticated
   using (owner = auth.uid() and public.is_owner()) with check (owner = auth.uid() and public.is_owner());
+
+-- ---------- Avis de Claude (v0.11) : analyse d'un set par l'API Claude, gardée en mémoire ----------
+-- Écrits par la fonction « bricklink » (action « advice », clé ANTHROPIC_API_KEY dans les secrets).
+create table if not exists public.bf_advice (
+  id            bigserial primary key,
+  set_no        text not null,
+  created_at    timestamptz not null default now(),
+  model         text,
+  verdict       text,          -- Acheter / À surveiller / Passer
+  score         int,           -- note de Claude sur 100
+  max_price     numeric(10,2), -- prix d'achat maximum conseillé (€)
+  summary       text,          -- une phrase
+  body          text,          -- analyse complète (texte, listes)
+  sources       jsonb,         -- [{title, url}]
+  input_tokens  int,
+  output_tokens int,
+  searches      int
+);
+create index if not exists bf_advice_set on public.bf_advice (set_no, created_at desc);
+alter table public.bf_advice enable row level security;
+drop policy if exists bf_advice_read on public.bf_advice;
+create policy bf_advice_read on public.bf_advice for select to authenticated using (public.is_owner());

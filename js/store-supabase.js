@@ -59,6 +59,11 @@ const catalogFromRow = (r) => ({
   avgSold: n(r.avg_sold), qtySold: r.qty_sold, avgStock: n(r.avg_stock), minStock: n(r.min_stock), qtyStock: r.qty_stock,
 });
 
+const adviceFromRow = (r) => ({
+  setNo: r.set_no, at: r.created_at, model: r.model, verdict: r.verdict, score: r.score, maxPrice: n(r.max_price),
+  summary: r.summary, body: r.body, sources: r.sources || [], tokens: (r.input_tokens || 0) + (r.output_tokens || 0), searches: r.searches || 0,
+});
+
 export async function createSupabaseStore() {
   if (!window.supabase) await loadScript("js/vendor/supabase.js");
   const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
@@ -134,17 +139,23 @@ export async function createSupabaseStore() {
     // Opportunités : catalogue des sets dont le retrait approche + sets surveillés
     async loadOpportunities() {
       const today = new Date().toISOString().slice(0, 10);
-      const [cat, watch] = await Promise.all([
+      const [cat, watch, adv] = await Promise.all([
         sb.from("bf_catalog").select("*").gte("exit_date", today).order("exit_date"),
         sb.from("bf_watch").select("set_no"),
+        sb.from("bf_advice").select("*").order("created_at", { ascending: false }).limit(500),
       ]);
       const catalog = must(cat).map(catalogFromRow);
-      return { catalog, watched: must(watch).map((r) => r.set_no),
+      const advice = {}; // dernier avis de Claude par set
+      for (const r of adv.error ? [] : adv.data) if (!advice[r.set_no]) advice[r.set_no] = adviceFromRow(r);
+      return { catalog, advice, watched: must(watch).map((r) => r.set_no),
         scannedAt: catalog.reduce((m, c) => (!m || c.seenAt > m ? c.seenAt : m), null) };
     },
     async setWatched(setNo, on) {
       if (on) must(await sb.from("bf_watch").upsert({ set_no: setNo }));
       else must(await sb.from("bf_watch").delete().eq("set_no", setNo));
+    },
+    async askClaude(setNo, context) {
+      return adviceFromRow((await call({ action: "advice", set_no: setNo, context })).advice);
     },
     async scanCatalog(force = false) {
       return await call({ action: "scan", force });

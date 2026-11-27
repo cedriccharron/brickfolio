@@ -5,7 +5,7 @@ import {
   manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary, candidateScore, rankCandidates,
 } from "../js/invest.js";
 import {
-  pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset,
+  pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset, parseAdvice,
 } from "../supabase/functions/bricklink/bricklink.js";
 
 let n = 0;
@@ -379,6 +379,16 @@ await test("opportunités : note à 10 critères et classement", () => {
     { now, owned: new Set(["75192-1"]), watched: new Set(["60300-1"]) });
   assert.deepEqual(list.map((x) => x.setNo), ["75192-1", "60300-1"]); // hors fenêtre écartés, mieux noté d'abord
   assert.deepEqual([list[0].owned, list[1].watched], [true, true]);
+});
+
+await test("avis de Claude : lecture du format imposé", () => {
+  const a = parseAdvice("VERDICT: À surveiller\nNOTE: 72\nPRIX MAX: 289,90\nRÉSUMÉ: Bon set, mais attendre une promo.\n\nPoints forts :\n- figurines exclusives");
+  assert.deepEqual([a.verdict, a.score, a.max_price, a.summary], ["À surveiller", 72, 289.9, "Bon set, mais attendre une promo."]);
+  assert.ok(a.body.startsWith("Points forts"));
+  const b = parseAdvice("**VERDICT:** Acheter\n**NOTE:** 85\nPRIX MAX: —\nRESUME: Oui.");
+  assert.deepEqual([b.verdict, b.score, b.max_price], ["Acheter", 85, null]);
+  const c = parseAdvice("Réponse libre sans format");
+  assert.deepEqual([c.verdict, c.score, c.body], [null, null, "Réponse libre sans format"]);
 });
 
 await test("message de fin de relevé : BrickLink et Brickset", () => {

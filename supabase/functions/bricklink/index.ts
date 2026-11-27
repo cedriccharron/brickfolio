@@ -5,6 +5,8 @@
 //  POST {"action":"refresh"}                    → complète les fiches Brickset, puis relève les prix de tous les sets détenus (« prices »).
 //  POST {"action":"scan"}                       → opportunités : balaie le catalogue Brickset (une fois par semaine) et relève
 //                                                 les prix BrickLink des sets dont le retrait approche (« bf_catalog »).
+//  POST {"action":"advice","set_no":"…","context":"…"} → avis de Claude (API Anthropic, recherche web) sur l'intérêt
+//                                                 d'investir dans ce set, gardé dans « bf_advice ». Secret : ANTHROPIC_API_KEY.
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
 // planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
@@ -14,7 +16,8 @@
 // BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
 // Brickset (prix LEGO d'origine, dates de sortie et de retrait) : BRICKSET_API_KEY. Chaque source marche sans l'autre.
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { blGet, bsGetSet, bsGetSets, isCandidate, mergeSet, needsBrickset, parseBrickset, parseCatalog, parseItem, priceGuide } from "./bricklink.js";
+import Anthropic from "npm:@anthropic-ai/sdk";
+import { blGet, bsGetSet, bsGetSets, isCandidate, mergeSet, needsBrickset, parseAdvice, parseBrickset, parseCatalog, parseItem, priceGuide } from "./bricklink.js";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const keys = {
@@ -233,6 +236,60 @@ async function scan(force = false) {
   return { scanned, candidates: count ?? 0, priced, pending, message };
 }
 
+// ---------- Avis de Claude (v0.11) ----------
+const ANTHROPIC_KEY = env("ANTHROPIC_API_KEY");
+const CLAUDE_MODEL = env("ANTHROPIC_MODEL") || "claude-opus-5-5";
+const ADVICE_SYSTEM = `Tu es un analyste spécialisé dans l'investissement en sets LEGO neufs scellés (achat avant retrait, revente après).
+Le lecteur est un particulier en Belgique qui achète en euros et revend surtout sur BrickLink et les plateformes européennes.
+Tu reçois la fiche du set et les chiffres mesurés par son application (Brickset, BrickLink). Tu peux faire quelques recherches web
+pour vérifier ce qui compte : date de retrait confirmée, remake ou nouvelle version annoncée, figurines exclusives,
+promos en cours et meilleur prix d'achat actuel, historique de sets comparables après leur retrait, actualité de la licence.
+Sois factuel, prudent et concret : pas de promesse de rendement, signale les incertitudes. Réponds en français.
+Format de réponse OBLIGATOIRE, en texte simple :
+VERDICT: Acheter | À surveiller | Passer
+NOTE: <nombre de 0 à 100>
+PRIX MAX: <prix d'achat maximum conseillé par boîte, en euros, nombre seul> (ou « — »)
+RÉSUMÉ: <une phrase>
+Puis l'analyse en 120 à 250 mots, avec des listes « - » : Points forts, Risques, Prix d'achat et horizon de revente.`;
+
+async function advice(setNo: string, context: string) {
+  if (!ANTHROPIC_KEY) throw new Error("Clé Claude absente : ajoute ANTHROPIC_API_KEY dans Edge Functions > Secrets");
+  const { data: cat } = await admin.from("bf_catalog").select("*").eq("set_no", setNo).maybeSingle();
+  const { data: own } = await admin.from("sets").select("*").eq("set_no", setNo).maybeSingle();
+  const row = cat || own;
+  if (!row) throw new Error("Set inconnu de l'application");
+  const facts = Object.entries(row).filter(([k, v]) => v != null && !["seen_at", "updated_at", "image_url", "brickset_at", "category_id", "price_error"].includes(k))
+    .map(([k, v]) => `${k}: ${v}`).join("\n");
+  const client = new Anthropic({ apiKey: ANTHROPIC_KEY });
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content:
+    `Set ${setNo} — ${row.name}\n\nFiche et marché (données de l'application) :\n${facts}\n\n` +
+    (context ? `Note de l'application et détail par critère :\n${String(context).slice(0, 3000)}\n\n` : "") +
+    `Date du jour : ${new Date().toISOString().slice(0, 10)}. Est-ce un bon investissement maintenant ?` }];
+  let res: Anthropic.Message | null = null;
+  let input = 0, output = 0, searches = 0;
+  for (let i = 0; i < 4; i++) {
+    res = await client.messages.create({
+      model: CLAUDE_MODEL, max_tokens: 6000, system: ADVICE_SYSTEM, messages,
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+    });
+    input += res.usage?.input_tokens || 0; output += res.usage?.output_tokens || 0;
+    searches += (res.usage as any)?.server_tool_use?.web_search_requests || 0;
+    if (res.stop_reason !== "pause_turn") break;
+    messages.push({ role: "assistant", content: res.content }); // recherche longue : on laisse le serveur continuer
+  }
+  if (!res) throw new Error("Pas de réponse de Claude");
+  if (res.stop_reason === "refusal") throw new Error("Claude a refusé de répondre");
+  const text = res.content.filter((b) => b.type === "text").map((b) => (b as Anthropic.TextBlock).text).join("").trim();
+  const sources: { title: string; url: string }[] = [];
+  for (const b of res.content) if (b.type === "text") for (const c of ((b as any).citations || [])) {
+    if (c.url && !sources.some((x) => x.url === c.url)) sources.push({ title: c.title || c.url, url: c.url });
+  }
+  const out = { set_no: setNo, model: res.model, ...parseAdvice(text), sources: sources.slice(0, 8), input_tokens: input, output_tokens: output, searches };
+  const { data, error } = await admin.from("bf_advice").insert(out).select().single();
+  if (error) throw error;
+  return { advice: data };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
@@ -248,6 +305,12 @@ Deno.serve(async (req) => {
     }
     if (body.action === "refresh") return json(await refresh());
     if (body.action === "scan") return json(await scan(body.force === true));
+    if (body.action === "advice") {
+      const setNo = String(body.set_no || "").trim().toUpperCase();
+      if (!/^[0-9A-Z]+(-\d+)?$/.test(setNo)) return json({ error: "Numéro de set invalide" }, 400);
+      if (await isCron(req)) return json({ error: "Avis réservé à l'application" }, 403);
+      return json(await advice(setNo, String(body.context || "")));
+    }
     return json({ error: "Action inconnue" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

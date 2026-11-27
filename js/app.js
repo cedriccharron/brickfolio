@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
 } from "./invest.js";
 
-const VERSION = "0.10.3";
+const VERSION = "0.11.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -239,6 +239,28 @@ function viewPortfolio() {
 }
 
 // ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ---------------
+const verdictCls = (v) => (/acheter/i.test(v) ? "buy" : /passer/i.test(v) ? "pass" : "watch");
+function adviceBlock(c) {
+  const a = S.opps.advice?.[c.setNo];
+  const busy = S.asking === c.setNo;
+  const btn = `<button class="btn ${a ? "ghost" : "primary"} small" data-action="opp-claude" data-v="${esc(c.setNo)}" ${S.asking ? "disabled" : ""}>
+    ${busy ? `<span class="spin">${icon("refresh", 16)}</span> Analyse en cours…` : a ? "Redemander à Claude" : "✦ Demander à Claude"}</button>`;
+  if (!a) return `<div class="advice empty">${btn}<p class="muted tiny">Analyse par Claude avec recherche web (remake, figurines exclusives, promos, sets comparables). Environ 0,10 à 0,20 € par avis, sur ta clé API.</p></div>`;
+  return `<div class="advice">
+    <div class="advice-head">
+      <span class="advice-verdict ${verdictCls(a.verdict || "")}">${esc(a.verdict || "Avis")}</span>
+      ${a.score != null ? `<span class="advice-score">${a.score}<small>/100</small></span>` : ""}
+      ${a.maxPrice ? `<span class="advice-max">prix max ${fmtEur(a.maxPrice)}</span>` : ""}
+    </div>
+    ${a.summary ? `<p class="advice-sum">${esc(a.summary)}</p>` : ""}
+    <details><summary>Lire l'analyse</summary><div class="advice-body">${adviceHtml(a.body)}</div>
+      ${a.sources?.length ? `<p class="advice-src">Sources : ${a.sources.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title.slice(0, 50))}</a>`).join(" · ")}</p>` : ""}
+    </details>
+    <p class="muted tiny">Avis du ${fmtDate(a.at)}${a.model ? ` · ${esc(a.model)}` : ""}${a.searches ? ` · ${a.searches} recherche${a.searches > 1 ? "s" : ""} web` : ""}</p>
+    ${btn}
+  </div>`;
+}
+
 // Recherche Google Shopping du set (numéro sans variante + nom) pour comparer les prix en boutique.
 const priceSearchUrl = (c) => `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(`LEGO ${c.setNo.replace(/-1$/, "")} ${c.name || ""}`.trim())}`;
 
@@ -248,6 +270,37 @@ async function loadOpps() {
   try { S.opps = await S.store.loadOpportunities(); S.oppsError = null; }
   catch (e) { S.oppsError = e.message; }
   finally { S.oppsLoading = false; if (route()[0] === "opps") render(); }
+}
+
+// Avis de Claude : envoie la fiche + la note de l'app (texte), garde la réponse en base.
+async function askClaude(c) {
+  if (S.asking) return;
+  S.asking = c.setNo; render();
+  toast("Claude analyse ce set (recherche web comprise)… 30 à 60 secondes", "info", { sticky: true });
+  const context = [`Note de l'application : ${c.score}/100${c.provisional ? " (provisoire)" : ""}`,
+    ...c.parts.map((p) => `- ${p.label} : ${p.points == null ? "inconnu" : `${p.points}/${p.max}`} (${p.detail})`),
+    c.owned ? "Le lecteur possède déjà ce set." : "", c.market != null ? `Marché BrickLink (moyenne vendue 6 mois, neuf) : ${Math.round(c.market)} €` : ""].filter(Boolean).join("\n");
+  try {
+    const a = await S.store.askClaude(c.setNo, context);
+    S.opps.advice = { ...(S.opps.advice || {}), [c.setNo]: a };
+    toast("Avis de Claude enregistré");
+  } catch (e) { toast(e.message, "error"); }
+  finally { S.asking = null; render(); }
+}
+
+// Mise en forme simple de l'avis : paragraphes, listes « - », **gras**.
+function adviceHtml(body) {
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  const out = []; let list = null;
+  for (const raw of String(body || "").split("\n")) {
+    const l = raw.trim();
+    if (/^[-•*]\s+/.test(l)) { (list ??= []).push(`<li>${inline(l.replace(/^[-•*]\s+/, ""))}</li>`); continue; }
+    if (list) { out.push(`<ul>${list.join("")}</ul>`); list = null; }
+    if (!l) continue;
+    out.push(/^#+\s/.test(l) || /:$/.test(l) ? `<h4>${inline(l.replace(/^#+\s*/, "").replace(/\*\*/g, ""))}</h4>` : `<p>${inline(l)}</p>`);
+  }
+  if (list) out.push(`<ul>${list.join("")}</ul>`);
+  return out.join("");
 }
 
 async function toggleWatch(no) {
@@ -307,7 +360,7 @@ function viewOpps() {
           <span class="opp-meta">${esc([c.setNo, c.theme, c.pieces ? `${c.pieces} pièces` : "", c.minifigs ? `${c.minifigs} fig.` : ""].filter(Boolean).join(" · "))}</span>
           <span class="opp-when">Retrait le ${fmtDate(c.exitDate)} · dans ${Math.max(0, c.daysLeft)} j</span>
           <span class="opp-line">${c.rrp ? `LEGO ${fmtEur(c.rrp)}` : "Prix LEGO inconnu"}${c.market != null ? ` → marché ${fmtEur(c.market)} <b class="${tone(c.premium)}">${fmtPct(c.premium)}</b>` : ` · <em>prix BrickLink à venir</em>`}</span>
-          <span class="opp-flags">${c.owned ? `<span class="tag qty">à toi</span>` : ""}${c.watched ? `<span class="tag retiring">★ surveillé</span>` : ""}${/exclusive/i.test(c.availability || "") ? `<span class="tag">exclusif LEGO</span>` : ""}</span>
+          <span class="opp-flags">${c.owned ? `<span class="tag qty">à toi</span>` : ""}${c.watched ? `<span class="tag retiring">★ surveillé</span>` : ""}${/exclusive/i.test(c.availability || "") ? `<span class="tag">exclusif LEGO</span>` : ""}${S.opps.advice?.[c.setNo]?.verdict ? `<span class="tag claude ${verdictCls(S.opps.advice[c.setNo].verdict)}">Claude : ${esc(S.opps.advice[c.setNo].verdict)}</span>` : ""}</span>
         </span>
         <span class="opp-score ${level(c.score)}"><strong>${c.score ?? "—"}</strong><small>${c.provisional ? "provisoire" : "/100"}</small></span>
       </button>
@@ -316,6 +369,7 @@ function viewOpps() {
           <span class="crit-l">${esc(p.label)}<small>${esc(p.detail)}</small></span>
           <span class="crit-bar"><i style="width:${p.value == null ? 0 : Math.round(p.value * 100)}%"></i></span>
           <span class="crit-p">${p.points == null ? "—" : String(p.points).replace(".", ",")}<small>/${p.max}</small></span></li>`).join("")}</ul>
+        ${adviceBlock(c)}
         <div class="opp-actions">
           <button class="btn ghost small" data-action="opp-watch" data-v="${esc(c.setNo)}">${c.watched ? "★ Ne plus surveiller" : "☆ Surveiller"}</button>
           <a class="btn primary small" href="${buy}">${icon("plus", 16)} Je l'achète</a>
@@ -985,6 +1039,11 @@ document.addEventListener("click", async (e) => {
   else if (a === "opp-open") { S.oppOpen = S.oppOpen === el.dataset.v ? null : el.dataset.v; render(); }
   else if (a === "opp-watch") { e.preventDefault(); toggleWatch(el.dataset.v); }
   else if (a === "opp-scan") scanOpps();
+  else if (a === "opp-claude") {
+    const owned = new Set(S.data.purchases.filter((p) => !isSold(p)).map((p) => p.setNo));
+    const c = rankCandidates(S.opps.catalog, { now: todayIso(), owned }).find((x) => x.setNo === el.dataset.v);
+    if (c) askClaude(c);
+  }
   else if (a === "reverse") { S.f.reverse = !S.f.reverse; saveFilters(); render(); }
   else if (a === "reset-filters") { e.preventDefault(); for (const k of FILTER_KEYS) delete S.f[k]; saveFilters(); render(); }
   else if (a === "refresh") refreshPrices();

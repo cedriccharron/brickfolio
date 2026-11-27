@@ -41,6 +41,7 @@ const DEMO_OPPS = [
   ["10331-1", "Kingfisher Bird", "Icons", "", "Retail", 0, 834, 49.99, "2024-01-01", 48, 1100, 3500, 4.3, null, null, null],
 ];
 const WATCH = "brickfolio-demo-surveilles";
+const ADVICE = "brickfolio-demo-avis";
 const readJSON = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } };
 const image = (no) => `https://img.bricklink.com/ItemImage/SN/0/${no}.png`;
 const setInfo = (no) => {
@@ -213,12 +214,21 @@ export function createDemoStore() {
         wantedBy, ownedBy, rating, avgSold, avgStock: avgSold && Math.round(avgSold * 1.08), minStock: avgSold && Math.round(avgSold * 0.93),
         qtySold, qtyStock, priceOn: avgSold ? iso(new Date()) : null, bricksetUrl: `https://brickset.com/sets/${setNo}`, seenAt: new Date().toISOString(),
       }));
-      return { catalog, watched: readJSON(WATCH, []), scannedAt: new Date().toISOString() };
+      return { catalog, advice: readJSON(ADVICE, {}), watched: readJSON(WATCH, []), scannedAt: new Date().toISOString() };
     },
     async setWatched(setNo, on) {
       const w = new Set(readJSON(WATCH, []));
       on ? w.add(setNo) : w.delete(setNo);
       localStorage.setItem(WATCH, JSON.stringify([...w]));
+    },
+    async askClaude(setNo) {
+      await new Promise((r) => setTimeout(r, 1200));
+      const a = { setNo, at: new Date().toISOString(), model: "démo", verdict: "À surveiller", score: 64, maxPrice: 380,
+        summary: "Avis simulé : en mode démo, Claude n'est pas appelé.",
+        body: "Points forts :\n- Gamme recherchée et figurines exclusives\n- Retrait annoncé proche\n\nRisques :\n- Beaucoup de boîtes en circulation\n- Réédition possible\n\nPrix d'achat et horizon :\n- Acheter sous 380 € et garder 2 à 3 ans",
+        sources: [{ title: "Brickset", url: `https://brickset.com/sets/${setNo}` }], tokens: 0, searches: 0 };
+      const all = readJSON(ADVICE, {}); all[setNo] = a; localStorage.setItem(ADVICE, JSON.stringify(all));
+      return a;
     },
     async scanCatalog() {
       return { scanned: true, candidates: DEMO_OPPS.length, priced: 0, pending: 0, message: "Catalogue simulé (mode démo)" };
