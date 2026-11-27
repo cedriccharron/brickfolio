@@ -307,3 +307,8 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .c-tip-t2 { font-weight: 400; opacity: .85; }
 .chart-hint { margin: 4px 0 0; }
 .chips.period { margin: 8px 0 4px; flex-wrap: wrap; }
+
+/* Fiche LEGO (Brickset, v0.6) */
+.tag.retired { background: #dff5e6; color: #0f6b34; vertical-align: 1px; }
+.tag.retiring { background: #fff1c7; color: #6b4e00; vertical-align: 1px; }
+.stats.lego { margin-top: 4px; }

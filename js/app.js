@@ -7,9 +7,10 @@ import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmo
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
+  setStatus, vsRetail,
 } from "./invest.js";
 
-const VERSION = "0.5.4";
+const VERSION = "0.6.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -121,7 +122,7 @@ function viewLogin() {
 }
 
 // ---------- Portefeuille ---------------------------------------------------
-const FILTER_KEYS = ["q", "cond", "shop", "year", "perf", "trend"];
+const FILTER_KEYS = ["q", "cond", "shop", "year", "perf", "trend", "status"];
 const saveFilters = () => { try { localStorage.setItem("brickfolio-filters", JSON.stringify(S.f)); } catch { /* sans importance */ } };
 const activeFilters = () => FILTER_KEYS.filter((k) => S.f[k]).length;
 
@@ -197,6 +198,7 @@ function viewPortfolio() {
         ${sel("year", "Acheté en", opt("year", "", "Toutes") + years.map((y) => opt("year", y, y)).join(""))}
         ${sel("perf", "Résultat", opt("perf", "", "Tous") + opt("perf", "gain", "En gain") + opt("perf", "loss", "En perte") + opt("perf", "unpriced", "Sans prix"))}
         ${sel("trend", "Tendance 3 mois", opt("trend", "", "Toutes") + opt("trend", "up", "En hausse") + opt("trend", "down", "En baisse"))}
+        ${sel("status", "Chez LEGO", opt("status", "", "Tous") + opt("status", "retired", "Retirés") + opt("status", "available", "Encore en vente"))}
       </div>
     </details>
 
@@ -264,7 +266,8 @@ function rowHtml(r) {
   if (S.sort === "trend3" || S.sort === "trend12") { const x = S.sort === "trend3" ? t.m3 : t.y1; main = `<span class="${tone(x?.pct)}">${fmtPct(x?.pct)}</span>`; sub = `<span class="small muted">${S.sort === "trend3" ? "3 mois" : "1 an"}</span>`; }
   if (S.sort === "held") { main = days2txt(r.heldDays); sub = `<span class="small muted">${pos.sold ? "détenu" : "en stock"}</span>`; }
   if (pos.sold && !["cagr", "held", "trend3", "trend12"].includes(S.sort)) { main = `<span class="${tone(pos.gain)}">${fmtSigned(pos.gain)}</span>`; sub = `<span class="small muted">vendu ${fmtEur(pos.value)}</span>`; }
-  const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : ""].filter(Boolean).join(" · ");
+  const info = [esc(p.setNo), CONDITIONS[p.condition], p.qty > 1 ? `×${p.qty}` : ""].filter(Boolean).join(" · ")
+    + (r.status === "retired" ? ` <span class="tag retired">retiré</span>` : r.status === "retiring" ? ` <span class="tag retiring">retrait annoncé</span>` : "");
   const when = [`${icon("calendar", 13)}${fmtDate(p.date)}`, p.shop ? esc(p.shop) : "", pos.sold ? `vendu le ${fmtDate(p.soldDate)}` : ""].filter(Boolean).join(" · ");
   return `<li><a class="pos" href="#/p/${p.id}">
     ${thumb(p.setNo)}
@@ -313,6 +316,7 @@ function viewDetail(p) {
       <div><span>${pos.sold ? "Vendu le" : "Acheté le"}</span><strong>${fmtDate(pos.sold ? p.soldDate : p.date)}</strong><em>${esc(pos.sold ? `acheté le ${fmtDate(p.date)}` : p.shop || "")}</em></div>
     </section>
     ${trendPanel(p, pos)}
+    ${legoPanel(p, set, pos)}
     ${market ? `<section class="panel">
       <h2>Marché BrickLink (${CONDITIONS[p.condition].toLowerCase()}, Europe)</h2>
       <div class="market">
@@ -402,6 +406,23 @@ function marketChart(p, rows) {
     <div class="panel-head"><h2>Prix d'une boîte</h2><span class="legend"><i class="lg-line"></i>Marché <i class="lg-ref"></i>Payé</span></div>
     ${lineChart({ main: pts, ref: [{ on: pts[0].on, value: paid }, { on: pts.at(-1).on, value: paid }], up, label: "Prix d'une boîte sur le marché", names: ["Marché", "Payé"], marks })}
     <p class="muted tiny chart-hint">Depuis le premier relevé${pts[0].on < p.date ? ", avant et après ton achat" : ""} · prix payé par boîte : ${fmtEur(paid, 2)}${p.fees ? " (frais compris)" : ""}.</p>
+  </section>`;
+}
+
+// Fiche LEGO (Brickset) : prix d'origine, sortie, retrait, thème, pièces.
+function legoPanel(p, set, pos) {
+  if (!set || !(set.rrp || set.launchDate || set.exitDate || set.theme)) return "";
+  const st = setStatus(set);
+  const cmp = vsRetail(p, set, pos.unit);
+  const statusTxt = st === "retired" ? `Retiré depuis le ${fmtDate(set.exitDate)}` : st === "retiring" ? `Retrait prévu le ${fmtDate(set.exitDate)}` : st === "available" ? "Encore en vente" : "—";
+  return `<section class="panel">
+    <div class="panel-head"><h2>Fiche LEGO</h2>${set.bricksetUrl ? `<a class="btn ghost small" href="${esc(set.bricksetUrl)}" target="_blank" rel="noopener">Brickset ↗</a>` : ""}</div>
+    <div class="stats lego">
+      <div><span>Prix LEGO d'origine</span><strong>${set.rrp ? fmtEur(set.rrp, 2) : "—"}</strong><em>${cmp ? `payé ${fmtPct(cmp.paid)}${cmp.paid < 0 ? " (remise)" : ""}` : "prix allemand, LEGO.com"}</em></div>
+      <div><span>Valeur / prix d'origine</span><strong class="${tone(cmp?.value)}">${cmp?.value != null ? fmtPct(cmp.value) : "—"}</strong><em>${cmp?.value != null ? `${fmtEur(pos.unit, 2)} la boîte` : "en attente d'un prix"}</em></div>
+      <div><span>Chez LEGO</span><strong class="${st === "retired" ? "up" : ""}">${st === "retired" ? "Retiré" : st === "retiring" ? "Bientôt retiré" : st === "available" ? "En vente" : "—"}</strong><em>${esc(statusTxt)}</em></div>
+      <div><span>Sorti le</span><strong>${set.launchDate ? fmtDate(set.launchDate) : set.year || "—"}</strong><em>${esc([set.theme, set.pieces ? `${set.pieces.toLocaleString("fr-BE")} pièces` : "", set.minifigs ? `${set.minifigs} minifig${set.minifigs > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · "))}</em></div>
+    </div>
   </section>`;
 }
 
@@ -652,6 +673,7 @@ function viewMore() {
     <section class="panel">
       <h2>${icon("refresh", 20)} Prix BrickLink</h2>
       <p class="muted small">Chaque lundi matin, la valeur de tes sets est relevée sur BrickLink : moyenne des ventes des 6 derniers mois en Europe, TVA comprise, dans l'état de ton achat (neuf ou occasion). S'il n'y a eu aucune vente, la moyenne des annonces en cours est utilisée.</p>
+      <p class="muted small">Le prix LEGO d'origine, les dates de sortie et de retrait, le thème et le nombre de pièces viennent de Brickset (fiche vérifiée tous les 30 jours tant que le set n'est pas retiré).</p>
       <p class="small">${run ? `Dernier relevé : <strong>${fmtDate(run.finished_at || run.started_at)}</strong>${run.message ? `<br><span class="muted">${esc(run.message)}</span>` : ""}` : "Aucun relevé pour l'instant."}</p>
       <button class="btn primary block" data-action="refresh" ${S.busy ? "disabled" : ""}>${S.busy ? "Relevé en cours…" : "Mettre à jour maintenant"}</button>
     </section>
@@ -678,7 +700,8 @@ async function refreshPrices(silent = false) {
   try {
     const r = await S.store.refreshPrices();
     await reload();
-    toast(r.failed ? `${r.ok} prix relevés, ${r.failed} échec(s)` : silent ? "Prix BrickLink relevé" : `${r.ok} prix relevés`, r.failed ? "error" : "info");
+    if (r.bricklink === false) { if (!silent) toast(r.message, "info"); } // Brickset seul, BrickLink pas encore branché
+    else toast(r.failed ? `${r.ok} prix relevés, ${r.failed} échec(s)` : silent ? "Prix BrickLink relevé" : `${r.ok} prix relevés`, r.failed ? "error" : "info");
   } catch (e) {
     // Relevé automatique après un nouvel achat : on ne dérange pas si BrickLink n'est pas encore branché.
     if (!silent) toast(e.message, "error");

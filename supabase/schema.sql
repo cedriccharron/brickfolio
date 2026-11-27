@@ -142,3 +142,16 @@ drop policy if exists brickfolio_factures_rw on storage.objects;
 create policy brickfolio_factures_rw on storage.objects for all to authenticated
   using (bucket_id = 'brickfolio-factures' and (storage.foldername(name))[1] = auth.uid()::text and public.is_owner())
   with check (bucket_id = 'brickfolio-factures' and (storage.foldername(name))[1] = auth.uid()::text and public.is_owner());
+
+-- ---------- Fiche Brickset (v0.6) ----------------------------------------------
+-- Prix LEGO d'origine (Allemagne, en euros), dates de sortie et de retrait, thème, pièces.
+-- Écrits par la fonction « bricklink » (secret BRICKSET_API_KEY), une fois par set puis tous les 30 jours tant qu'il n'est pas retiré.
+alter table public.sets add column if not exists theme        text;
+alter table public.sets add column if not exists subtheme     text;
+alter table public.sets add column if not exists pieces       int;
+alter table public.sets add column if not exists minifigs     int;
+alter table public.sets add column if not exists rrp_eur      numeric(10,2);
+alter table public.sets add column if not exists launch_date  date;
+alter table public.sets add column if not exists exit_date    date;
+alter table public.sets add column if not exists brickset_url text;
+alter table public.sets add column if not exists brickset_at  timestamptz;

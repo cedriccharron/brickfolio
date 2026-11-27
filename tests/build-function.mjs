@@ -5,7 +5,7 @@ import fs from "node:fs";
 const dir = new URL("../supabase/functions/bricklink/", import.meta.url);
 const lib = fs.readFileSync(new URL("bricklink.js", dir), "utf8").replace(/^export /gm, "");
 const idx = fs.readFileSync(new URL("index.ts", dir), "utf8")
-  .replace(/^import \{ blGet, parseItem, priceGuide \} from "\.\/bricklink\.js";\n/m, "");
+  .replace(/^import \{[^}]*\} from "\.\/bricklink\.js";\n/m, "");
 if (idx.includes('from "./bricklink.js"')) throw new Error("Import de bricklink.js non reconnu");
 const out = "// @ts-nocheck\n// Fichier généré par tests/build-function.mjs (index.ts + bricklink.js) pour l'éditeur Supabase.\n"
   + idx.replace(/(import \{ createClient \}[^\n]*\n)/, `$1\n${lib}\n`);

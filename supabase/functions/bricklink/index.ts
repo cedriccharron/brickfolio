@@ -2,7 +2,7 @@
 // Garde les clés BrickLink côté serveur (jamais dans le navigateur).
 //
 //  POST {"action":"lookup","set_no":"75192-1"}  → fiche du set (nom, année, image), mise en cache dans « sets ».
-//  POST {"action":"refresh"}                    → relève les prix de tous les sets détenus, écrit dans « prices ».
+//  POST {"action":"refresh"}                    → complète les fiches Brickset, puis relève les prix de tous les sets détenus (« prices »).
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
 // planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
@@ -10,8 +10,9 @@
 //
 // Secrets (Edge Functions > Secrets) : BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET,
 // BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
+// Brickset (prix LEGO d'origine, dates de sortie et de retrait) : BRICKSET_API_KEY. Chaque source marche sans l'autre.
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { blGet, parseItem, priceGuide } from "./bricklink.js";
+import { blGet, bsGetSet, mergeSet, needsBrickset, parseBrickset, parseItem, priceGuide } from "./bricklink.js";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const keys = {
@@ -20,6 +21,9 @@ const keys = {
   token: env("BRICKLINK_TOKEN"),
   tokenSecret: env("BRICKLINK_TOKEN_SECRET"),
 };
+const hasBrickLink = !!(keys.consumerKey && keys.token);
+const BRICKSET_KEY = env("BRICKSET_API_KEY");
+const BRICKSET_PER_RUN = 25; // la clé Brickset gratuite permet 100 appels par jour
 const REGION = env("BRICKLINK_REGION") || "europe";
 const BUDGET_MS = 110_000; // on s'arrête avant la limite de durée de la fonction
 const PAUSE_MS = 250;      // politesse envers l'API (5 000 appels / jour)
@@ -53,18 +57,62 @@ async function isCron(req: Request): Promise<boolean> {
   return data === true;
 }
 
-async function lookup(setNo: string) {
+async function saveSet(row: Record<string, unknown>) {
+  const { error } = await admin.from("sets").upsert({ ...row, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  return row;
+}
+
+// Complète une fiche existante avec Brickset (null si le set est inconnu de Brickset : on réessaiera dans 30 jours).
+async function enrich(row: Record<string, unknown>) {
+  const bs = parseBrickset(await bsGetSet(String(row.set_no), BRICKSET_KEY));
+  return await saveSet(mergeSet(row, bs, new Date().toISOString()));
+}
+
+// Fiche d'un set : cache, sinon BrickLink et/ou Brickset selon les clés présentes.
+// withBrickset = false pendant le relevé des prix : les fiches Brickset passent par catalogPass (quota limité).
+async function lookup(setNo: string, withBrickset = true) {
   const { data: cached } = await admin.from("sets").select("*").eq("set_no", setNo).maybeSingle();
-  if (cached) return cached;
-  try {
-    const row = { ...parseItem(await blGet(`/items/SET/${encodeURIComponent(setNo)}`, {}, keys)), updated_at: new Date().toISOString() };
-    const { error } = await admin.from("sets").upsert(row);
-    if (error) throw error;
-    return row;
-  } catch (e) {
-    if ((e as { code?: number }).code === 404) return null;
-    throw e;
+  if (cached) {
+    if (withBrickset && BRICKSET_KEY && !cached.brickset_at) { try { return await enrich(cached); } catch { /* Brickset plus tard */ } }
+    return cached;
   }
+  let bl = null, bs = null, bsTried = false;
+  const errors: Error[] = [];
+  if (hasBrickLink) {
+    try { bl = parseItem(await blGet(`/items/SET/${encodeURIComponent(setNo)}`, {}, keys)); }
+    catch (e) { if ((e as { code?: number }).code !== 404) errors.push(e as Error); }
+  }
+  if (withBrickset && BRICKSET_KEY) {
+    try { bs = parseBrickset(await bsGetSet(setNo, BRICKSET_KEY)); bsTried = true; }
+    catch (e) { errors.push(e as Error); }
+  }
+  if (!bl && !bs) { if (errors.length) throw errors[0]; return null; }
+  return await saveSet(mergeSet(bl, bs, bsTried ? new Date().toISOString() : null));
+}
+
+// Fiches Brickset des sets détenus : manquantes d'abord, puis celles de plus de 30 jours (sets pas encore retirés).
+async function catalogPass(setNos: string[]) {
+  if (!BRICKSET_KEY) return { done: 0, failed: [] as string[] };
+  const { data: rows } = await admin.from("sets").select("*").in("set_no", setNos);
+  const bySet = new Map((rows || []).map((r) => [r.set_no, r]));
+  const todo = setNos.filter((no) => !bySet.has(no) || needsBrickset(bySet.get(no)))
+    .sort((a, b) => String(bySet.get(a)?.brickset_at || "").localeCompare(String(bySet.get(b)?.brickset_at || "")))
+    .slice(0, BRICKSET_PER_RUN);
+  let done = 0;
+  const failed: string[] = [];
+  for (const no of todo) {
+    try {
+      const row = bySet.get(no);
+      if (row) await enrich(row); else await lookup(no);
+      done++;
+    } catch (e) {
+      failed.push(`${no} : ${(e as Error).message}`);
+      if (/limit/i.test((e as Error).message)) break; // quota du jour atteint
+    }
+    await sleep(PAUSE_MS);
+  }
+  return { done, failed };
 }
 
 async function refresh() {
@@ -80,13 +128,15 @@ async function refresh() {
   for (const r of last || []) { const k = `${r.set_no}|${r.condition}`; if (!lastOn.has(k)) lastOn.set(k, r.fetched_on); }
   pairs.sort((a, b) => (lastOn.get(`${a.set_no}|${a.condition}`) || "").localeCompare(lastOn.get(`${b.set_no}|${b.condition}`) || ""));
 
+  const cat = await catalogPass([...new Set(pairs.map((p) => p.set_no))]);
+
   let ok = 0;
   const failed: string[] = [];
   let skipped = 0;
-  for (const p of pairs) {
+  for (const p of hasBrickLink ? pairs : []) {
     if (Date.now() - started > BUDGET_MS) { skipped = pairs.length - ok - failed.length; break; }
     try {
-      await lookup(p.set_no);
+      await lookup(p.set_no, false);
       const row = await priceGuide(p.set_no, p.condition, keys, { region: REGION });
       const { error: e } = await admin.from("prices").upsert(
         { ...row, region: REGION, fetched_on: new Date().toISOString().slice(0, 10), fetched_at: new Date().toISOString() },
@@ -101,19 +151,21 @@ async function refresh() {
   }
 
   const message = [
-    `${ok} relevé(s) sur ${pairs.length}`,
+    hasBrickLink ? `${ok} relevé(s) sur ${pairs.length}` : "Prix BrickLink : clés absentes",
+    BRICKSET_KEY ? `${cat.done} fiche(s) Brickset mise(s) à jour` : "",
+    cat.failed.length ? `Brickset : ${cat.failed.slice(0, 3).join(" ; ")}` : "",
     skipped ? `${skipped} reporté(s) au prochain passage` : "",
     failed.length ? `Échecs : ${failed.slice(0, 5).join(" ; ")}` : "",
   ].filter(Boolean).join(". ");
   if (run) await admin.from("runs").update({ finished_at: new Date().toISOString(), ok, failed: failed.length, message }).eq("id", run.id);
-  return { ok, failed: failed.length, skipped, total: pairs.length, message };
+  return { ok, failed: failed.length, skipped, total: pairs.length, message, brickset: cat.done, bricklink: hasBrickLink };
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
   if (!(await isCron(req)) && !(await isOwner(req))) return json({ error: "Accès refusé" }, 403);
-  if (!keys.consumerKey || !keys.token) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
+  if (!hasBrickLink && !BRICKSET_KEY) return json({ error: "Clés BrickLink absentes : ajoute-les dans Edge Functions > Secrets" }, 503);
 
   try {
     const body = await req.json().catch(() => ({}));

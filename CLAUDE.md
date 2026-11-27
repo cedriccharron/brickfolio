@@ -22,6 +22,7 @@ Suivi d'investissement LEGO : achats, valeur BrickLink relevée chaque semaine, 
 - Fenêtres (`<dialog>`) : réagir à l'événement `submit` du formulaire (`e.submitter.value`), pas seulement à `close` (pas déclenché dans certains navigateurs intégrés).
 - Factures (v0.3) : un fichier par achat (PDF ou photo, 10 Mo max) dans le bucket privé `brickfolio-factures`, chemin `<uid>/<id achat>/<horodatage>-<nom>` ; colonnes `invoice_path/name/type` sur `purchases`. Ouverture par lien signé de 10 min. En démo : data URL dans `brickfolio-demo-factures` (3 Mo max).
 - Lecture de facture (v0.4, gratuite, sans serveur) : `js/invoice-read.js` extrait le texte (pdf.js 4.10.38 pour les PDF, Tesseract.js 5.1.1 `fra+eng` pour les photos et PDF scannés, chargés à la demande depuis jsDelivr) ; `js/invoice-parse.js` en tire vendeur, date, sets, prix, frais, remise et total par règles (tests : `node tests/invoice.test.mjs`). Le choix d'une lecture par Claude (payante) a été écarté par Cédric. Frais affectés au premier set enregistré de la facture.
+- Brickset (v0.6) : secret `BRICKSET_API_KEY`, `getSets` (POST, `userHash` vide), fiche fusionnée dans `sets` (`mergeSet` : BrickLink prime pour nom/image ; colonnes theme, subtheme, pieces, minifigs, rrp_eur = LEGO.com DE, launch_date, exit_date, brickset_url, brickset_at). Quota 100 appels/jour : fiche demandée une fois puis tous les 30 jours tant que non retirée (`needsBrickset`), 25 max par relevé. Marche sans clés BrickLink (lookup et refresh renvoient `bricklink: false`). Client : `setStatus()` (retired / retiring / available), `vsRetail()`, filtre « Chez LEGO », panneau « Fiche LEGO », colonnes CSV.
 - Images : BrickLink, repli sur Brickset (`images.brickset.com/sets/images/<no>.jpg`).
 
 ## Tests
@@ -35,4 +36,5 @@ Incrémenter `VERSION` dans `sw.js` à chaque déploiement, puis pousser sur `ma
 
 ## Prochaines étapes
 - Supabase branché le 23/11/2026 (schéma, fonction, cron, compte). Reste : clés BrickLink dans les secrets dès que BrickLink revient (panne fin novembre 2026), puis premier relevé réel.
-- Idées : prix de vente conseillé (LEGO retail) via Brickset, statut « retiré » du set, alertes de seuil, import CSV.
+- Brickset branché en v0.6 (27/11/2026) : clé à demander par Cédric. BrickLink : compte vendeur bloqué tant qu'il n'a pas une évaluation positive (petite commande à passer).
+- Idées : alertes de seuil, import CSV, deuxième source eBay Browse API (annonces en cours, gratuit).

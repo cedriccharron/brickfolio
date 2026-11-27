@@ -96,3 +96,62 @@ export async function priceGuide(setNo, condition, keys, { region = "europe", cu
     avg_stock: stock.avg, min_stock: stock.min, qty_stock: stock.qty,
   };
 }
+
+// ---------- Brickset (https://brickset.com/article/52664/api-version-3-documentation) ----------
+// Clé gratuite, 100 appels par jour : on ne demande chaque fiche qu'une fois, puis tous les 30 jours tant que le set n'est pas retiré.
+export const BRICKSET_API = "https://brickset.com/api/v3.asmx";
+export const BRICKSET_FIELDS = ["theme", "subtheme", "pieces", "minifigs", "rrp_eur", "launch_date", "exit_date", "brickset_url"];
+
+export async function bsGetSet(setNo, apiKey, fetchFn = fetch) {
+  const body = new URLSearchParams({ apiKey, userHash: "", params: JSON.stringify({ setNumber: setNo }) });
+  const res = await fetchFn(`${BRICKSET_API}/getSets`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: body.toString(),
+  });
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Brickset : réponse illisible (HTTP ${res.status})`); }
+  if (data?.status !== "success") throw new Error(`Brickset : ${data?.message || `HTTP ${res.status}`}`);
+  return data.sets?.[0] || null;
+}
+
+const day = (d) => (d && /^\d{4}-\d{2}-\d{2}/.test(String(d)) ? String(d).slice(0, 10) : null);
+const posInt = (n) => (Number.isFinite(Number(n)) && Number(n) > 0 ? Math.round(Number(n)) : null);
+
+// Fiche Brickset → colonnes de la table « sets ». Prix d'origine : LEGO.com Allemagne (euros).
+export function parseBrickset(s) {
+  if (!s) return null;
+  const de = s.LEGOCom?.DE || {};
+  const rrp = Number(de.retailPrice);
+  return {
+    set_no: `${s.number}-${s.numberVariant ?? 1}`,
+    name: decodeEntities(s.name || ""),
+    year: posInt(s.year),
+    image_url: httpsUrl(s.image?.imageURL) || null,
+    theme: s.theme || null,
+    subtheme: s.subtheme || null,
+    pieces: posInt(s.pieces),
+    minifigs: posInt(s.minifigs),
+    rrp_eur: rrp > 0 ? Math.round(rrp * 100) / 100 : null,
+    launch_date: day(s.launchDate) || day(de.dateFirstAvailable),
+    exit_date: day(s.exitDate),
+    brickset_url: httpsUrl(s.bricksetURL) || null,
+  };
+}
+
+// Fusion : la fiche BrickLink (nom, image) prime ; Brickset complète. « at » marque la date de consultation de Brickset.
+export function mergeSet(base, bs, at) {
+  const out = { ...(base || {}) };
+  if (bs) {
+    if (!base) Object.assign(out, { set_no: bs.set_no, name: bs.name, year: bs.year, image_url: bs.image_url, category_id: null });
+    for (const k of BRICKSET_FIELDS) out[k] = bs[k] ?? null;
+  }
+  if (at) out.brickset_at = at;
+  return out;
+}
+
+// Faut-il (re)demander la fiche Brickset ? Jamais consultée, ou plus de 30 jours et pas encore retiré.
+export function needsBrickset(row, now = new Date()) {
+  if (!row?.brickset_at) return true;
+  const today = now.toISOString().slice(0, 10);
+  if (row.exit_date && row.exit_date <= today) return false;
+  return now - new Date(row.brickset_at) > 30 * 86400000;
+}

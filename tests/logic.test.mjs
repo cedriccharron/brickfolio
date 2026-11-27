@@ -2,9 +2,11 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows,
+  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail,
 } from "../js/invest.js";
-import { pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide } from "../supabase/functions/bricklink/bricklink.js";
+import {
+  pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset,
+} from "../supabase/functions/bricklink/bricklink.js";
 
 let n = 0;
 const test = async (name, fn) => { await fn(); n++; console.log("ok -", name); };
@@ -244,6 +246,82 @@ await test("appel BrickLink simulé (URL, en-tête, erreurs)", async () => {
   assert.ok(calls[0].auth.startsWith("OAuth ") && calls[0].auth.includes("oauth_signature="));
   const denied = async () => ({ status: 200, json: async () => ({ meta: { code: 401, description: "TOKEN_IP_MISMATCHED" } }) });
   await assert.rejects(priceGuide("10294-1", "N", keys, { fetchFn: denied }), /TOKEN_IP_MISMATCHED/);
+});
+
+// ---------- Brickset ----------
+const BS = {
+  setID: 26725, number: "75192", numberVariant: 1, name: "Millennium Falcon", year: 2017, theme: "Star Wars", subtheme: "Ultimate Collector Series",
+  pieces: 7541, minifigs: 8, image: { imageURL: "https://images.brickset.com/sets/images/75192-1.jpg" }, bricksetURL: "https://brickset.com/sets/75192-1",
+  launchDate: "2017-10-01T00:00:00Z", exitDate: null,
+  LEGOCom: { DE: { retailPrice: 849.99, dateFirstAvailable: "2017-10-01T00:00:00Z", dateLastAvailable: null }, US: { retailPrice: 849.99 } },
+};
+
+await test("Brickset : appel getSets et lecture de la fiche", async () => {
+  const calls = [];
+  const fake = async (url, init) => { calls.push({ url, init }); return { status: 200, json: async () => ({ status: "success", matches: 1, sets: [BS] }) }; };
+  const s = await bsGetSet("75192-1", "CLE", fake);
+  assert.equal(calls[0].url, "https://brickset.com/api/v3.asmx/getSets");
+  assert.equal(calls[0].init.method, "POST");
+  const body = new URLSearchParams(calls[0].init.body);
+  assert.equal(body.get("apiKey"), "CLE");
+  assert.equal(body.get("userHash"), "");
+  assert.deepEqual(JSON.parse(body.get("params")), { setNumber: "75192-1" });
+  const row = parseBrickset(s);
+  assert.equal(row.set_no, "75192-1");
+  assert.equal(row.rrp_eur, 849.99);
+  assert.equal(row.launch_date, "2017-10-01");
+  assert.equal(row.exit_date, null);
+  assert.equal(row.pieces, 7541);
+  assert.equal(row.theme, "Star Wars");
+  const none = async () => ({ status: 200, json: async () => ({ status: "success", matches: 0, sets: [] }) });
+  assert.equal(await bsGetSet("99999-1", "CLE", none), null);
+  const limit = async () => ({ status: 200, json: async () => ({ status: "error", message: "API limit exceeded" }) });
+  await assert.rejects(bsGetSet("75192-1", "CLE", limit), /Brickset : API limit exceeded/);
+});
+
+await test("Brickset : fusion avec la fiche BrickLink et rafraîchissement", () => {
+  const bs = parseBrickset({ ...BS, exitDate: "2024-12-31T00:00:00Z", LEGOCom: {} });
+  assert.equal(bs.rrp_eur, null);
+  assert.equal(bs.launch_date, "2017-10-01");
+  const bl = { set_no: "75192-1", name: "Millennium Falcon - UCS (2nd edition)", year: 2017, image_url: "https://img.bricklink.com/x.png", category_id: 65 };
+  const m = mergeSet(bl, bs, "2026-11-27T00:00:00Z");
+  assert.equal(m.name, bl.name); // BrickLink prime pour le nom et l'image
+  assert.equal(m.image_url, bl.image_url);
+  assert.equal(m.exit_date, "2024-12-31");
+  assert.equal(m.brickset_at, "2026-11-27T00:00:00Z");
+  const only = mergeSet(null, bs, null);
+  assert.equal(only.name, "Millennium Falcon");
+  assert.equal(only.category_id, null);
+  assert.equal(only.brickset_at, undefined);
+  const notFound = mergeSet(bl, null, "2026-11-27T00:00:00Z");
+  assert.equal(notFound.theme, undefined);
+  assert.equal(notFound.brickset_at, "2026-11-27T00:00:00Z");
+  const now = new Date("2026-11-27T12:00:00Z");
+  assert.equal(needsBrickset({}, now), true);
+  assert.equal(needsBrickset({ brickset_at: "2026-11-20T00:00:00Z" }, now), false);
+  assert.equal(needsBrickset({ brickset_at: "2026-10-01T00:00:00Z" }, now), true);
+  assert.equal(needsBrickset({ brickset_at: "2026-10-01T00:00:00Z", exit_date: "2024-12-31" }, now), false); // retiré : figé
+});
+
+await test("statut LEGO, comparaison au prix d'origine, filtre", () => {
+  const now = "2026-11-27";
+  assert.equal(setStatus(null, now), null);
+  assert.equal(setStatus({ name: "x" }, now), null);
+  assert.equal(setStatus({ rrp: 100 }, now), "available");
+  assert.equal(setStatus({ exitDate: "2025-12-31" }, now), "retired");
+  assert.equal(setStatus({ exitDate: "2027-06-30" }, now), "retiring");
+  const c = vsRetail(P({ unitPrice: 500 }), { rrp: 625 }, 750);
+  assert.equal(Math.round(c.paid * 100), -20);
+  assert.equal(Math.round(c.value * 100), 20);
+  assert.equal(vsRetail(P({}), { rrp: null }, 750), null);
+  const sets = { "10294-1": { name: "Titanic", exitDate: "2025-12-31", rrp: 629.99 }, "21318-1": { name: "Tree House", launchDate: "2019-08-01" } };
+  const rows = [analyze(P({}), [], sets, now), analyze(P({ setNo: "21318-1" }), [], sets, now)];
+  assert.equal(rows[0].status, "retired");
+  assert.deepEqual(filterRows(rows, { status: "retired" }).map((r) => r.p.setNo), ["10294-1"]);
+  assert.deepEqual(filterRows(rows, { status: "available" }).map((r) => r.p.setNo), ["21318-1"]);
+  const csv = toCSV([P({})], [], sets);
+  assert.ok(csv.includes('"Prix LEGO d\'origine";"Date de retrait"'));
+  assert.ok(csv.includes('"629,99";"2025-12-31"'));
 });
 
 console.log(`\n${n} tests réussis`);

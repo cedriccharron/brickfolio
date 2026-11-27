@@ -152,6 +152,20 @@ export function trends(prices, setNo, condition, now = today()) {
 }
 
 // Ligne complète pour le tableau de bord : achat, situation, tendances passées.
+// Statut commercial d'après Brickset : « retired » (date de retrait passée), « retiring » (retrait annoncé), « available », ou null si inconnu.
+export function setStatus(set, now = today()) {
+  if (!set) return null;
+  if (set.exitDate) return set.exitDate <= now ? "retired" : "retiring";
+  return set.launchDate || set.rrp != null ? "available" : null;
+}
+
+// Comparaison au prix LEGO d'origine (par boîte) : remise obtenue à l'achat, valeur actuelle par rapport au prix d'origine.
+export function vsRetail(p, set, unit) {
+  const rrp = set?.rrp;
+  if (!(rrp > 0)) return null;
+  return { rrp, paid: num(p.unitPrice) / rrp - 1, value: unit != null ? unit / rrp - 1 : null };
+}
+
 export function analyze(p, prices, sets = {}, now = today()) {
   const pos = position(p, prices, now);
   const t = trends(prices, p.setNo, p.condition, now);
@@ -159,6 +173,7 @@ export function analyze(p, prices, sets = {}, now = today()) {
   return {
     p, pos, t, name: (p.name || "").trim() || sets[p.setNo]?.name || "", alt: sets[p.setNo]?.name || "",
     heldDays: Math.max(0, daysBetween(p.date, end)),
+    status: setStatus(sets[p.setNo], now),
     year: p.date.slice(0, 4),
   };
 }
@@ -221,6 +236,8 @@ export function filterRows(rows, f = {}) {
     if (f.perf === "unpriced" && r.pos.priced) return false;
     if (f.trend === "up" && !(r.t.m3?.pct > 0)) return false;
     if (f.trend === "down" && !(r.t.m3?.pct < 0)) return false;
+    if (f.status === "retired" && r.status !== "retired") return false;
+    if (f.status === "available" && !(r.status === "available" || r.status === "retiring")) return false;
     return true;
   });
 }
@@ -266,14 +283,14 @@ export function splitSale(p, n, soldPrice, soldDate, newId) {
 // Export tableur (séparateur « ; » et virgule décimale, comme Excel en Belgique).
 export function toCSV(purchases, prices, sets) {
   const head = ["Set", "Nom", "État", "Quantité", "Prix unitaire", "Frais", "Coût", "Date d'achat", "Boutique",
-    "Valeur actuelle", "Plus-value", "Rendement %", "Tendance 3 mois %", "Tendance 1 an %", "Vendu le", "Prix de vente", "Notes"];
+    "Valeur actuelle", "Plus-value", "Rendement %", "Tendance 3 mois %", "Tendance 1 an %", "Prix LEGO d'origine", "Date de retrait", "Vendu le", "Prix de vente", "Notes"];
   const f = (n) => (n == null ? "" : String(Math.round(n * 100) / 100).replace(".", ","));
   const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
   const lines = purchases.map((p) => {
     const { pos, t } = analyze(p, prices, sets);
     const pc = (v) => (v == null ? "" : f(v * 100));
     return [p.setNo, (p.name || "").trim() || sets[p.setNo]?.name, CONDITIONS[p.condition], p.qty, f(p.unitPrice), f(p.fees), f(pos.cost), p.date, p.shop,
-      f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
+      f(pos.value), f(pos.gain), pc(pos.pct), pc(t.m3?.pct), pc(t.y1?.pct), f(sets[p.setNo]?.rrp), sets[p.setNo]?.exitDate || "", p.soldDate || "", f(num(p.soldPrice)), p.notes].map(q).join(";");
   });
   return "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");
 }

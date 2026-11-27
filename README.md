@@ -44,6 +44,8 @@ Brickfolio partage le projet Supabase de Cap'taine (`zzhzdiuoonhvxndmziju`) : le
 3. *SQL Editor* : `supabase/cron.sql` (en remplaçant `<PROJET>`). Il crée le relevé du lundi et génère dans le coffre chiffré de Supabase (Vault) le secret qui l'autorise : personne n'a à le connaître.
 4. `js/config.js` : URL du projet et clé publique (*Project Settings > API*).
 
+**Brickset** (prix LEGO d'origine, dates de sortie et de retrait, thème, pièces) : demande une clé gratuite sur https://brickset.com/tools/webservices/requestkey (compte Brickset nécessaire), puis ajoute le secret `BRICKSET_API_KEY` dans *Edge Functions > Secrets*. Fonctionne sans BrickLink : la recherche d'un set et le bouton de relevé complètent alors les fiches. La clé gratuite permet 100 appels par jour : chaque fiche est demandée une fois, puis tous les 30 jours tant que le set n'est pas retiré (25 fiches au plus par relevé).
+
 **Reste à faire quand BrickLink est en ligne** : *Edge Functions > Secrets*, ajouter `BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`, `BRICKLINK_TOKEN_SECRET` (facultatif : `BRICKLINK_REGION`, par défaut `europe`). Tant qu'ils manquent, la fonction répond « Clés BrickLink absentes ».
 
 ### 3. Mettre en ligne (GitHub Pages)

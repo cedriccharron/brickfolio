@@ -42,7 +42,13 @@ const priceFromRow = (r) => ({
   avgSold: n(r.avg_sold), minSold: n(r.min_sold), maxSold: n(r.max_sold), qtySold: r.qty_sold,
   avgStock: n(r.avg_stock), minStock: n(r.min_stock), qtyStock: r.qty_stock,
 });
-const setFromRow = (r) => ({ setNo: r.set_no, name: r.name, year: r.year, image: r.image_url });
+const setFromRow = (r) => ({
+  setNo: r.set_no, name: r.name, year: r.year, image: r.image_url,
+  // Fiche Brickset (v0.6)
+  theme: r.theme || null, subtheme: r.subtheme || null, pieces: r.pieces ?? null, minifigs: r.minifigs ?? null,
+  rrp: r.rrp_eur != null ? Number(r.rrp_eur) : null, launchDate: r.launch_date || null, exitDate: r.exit_date || null,
+  bricksetUrl: r.brickset_url || null, bricksetAt: r.brickset_at || null,
+});
 
 export async function createSupabaseStore() {
   if (!window.supabase) await loadScript("js/vendor/supabase.js");
