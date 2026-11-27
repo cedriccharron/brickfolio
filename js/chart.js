@@ -56,7 +56,7 @@ export function lineChart({ main, ref = null, retail = null, up = true, label = 
     .map((k) => `<line class="c-tick" x1="${X(k.on)}" x2="${X(k.on)}" y1="${H - B}" y2="${H - B + 4}"/>
       <text class="c-lbl" x="${k.anchor === "start" ? L : k.anchor === "end" ? W - R : X(k.on)}" y="${H - 6}" text-anchor="${k.anchor}">${esc(k.text)}</text>`).join("");
   const markers = marks.filter((m) => t(m.on) >= x0 && t(m.on) <= x1).map((m) =>
-    `<line class="c-mark" x1="${X(m.on)}" x2="${X(m.on)}" y1="${T}" y2="${H - B}"/><text class="c-lbl c-mark-lbl" x="${X(m.on) + 3}" y="${T + 9}">${esc(m.text)}</text>`).join("");
+    `<line class="c-mark" x1="${X(m.on)}" x2="${X(m.on)}" y1="${T}" y2="${H - B}"/><text class="c-lbl c-mark-lbl" x="${X(m.on) > W - R - 40 ? X(m.on) - 3 : X(m.on) + 3}" y="${T + 9}"${X(m.on) > W - R - 40 ? ' text-anchor="end"' : ""}>${esc(m.text)}</text>`).join("");
 
   const end = pts.at(-1);
   const base = signed ? 0 : y0; // aire jusqu'au zéro pour une plus-value

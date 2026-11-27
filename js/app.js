@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.8.0";
+const VERSION = "0.8.1";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -307,31 +307,37 @@ function viewDetail(p) {
   const src = valueSource(last);
   const market = [...rows].reverse().find((r) => !r.manual); // dernier relevé BrickLink
   const recent = rows.slice(-10).reverse();
+  const status = setStatus(set);
 
   return `${top(pName(p), { back: "#/", sub: `${esc(p.setNo)}${set?.year ? ` · ${set.year}` : ""} · ${CONDITIONS[p.condition]}`,
       actions: `<a class="icon-btn" href="#/p/${p.id}/edit" aria-label="Modifier">${icon("edit")}</a>` })}
-    <div class="detail-head">
-      ${thumb(p.setNo, "xl")}
-      <div class="detail-num">
-        <span class="kicker">${pos.sold ? "Vendu" : "Valeur actuelle"}</span>
-        <strong class="big-num">${pos.priced ? fmtEur(pos.value) : "—"}</strong>
-        <span class="delta ${tone(pos.gain)}">${pos.priced ? `${fmtSigned(pos.gain)} · ${fmtPct(pos.pct)}` : "En attente du premier relevé"}</span>
-      </div>
+    <div class="showcase" style="--tint:${tint(p.setNo)}">
+      ${thumb(p.setNo, "fill")}
+      <span class="showcase-tags">${status === "retired" ? `<span class="tag retired">retiré</span>` : status === "retiring" ? `<span class="tag retiring">retrait annoncé</span>` : ""}${pos.sold ? `<span class="tag sold">vendu</span>` : ""}${p.qty > 1 ? `<span class="tag qty">×${p.qty}</span>` : ""}</span>
     </div>
-    <section class="panel">
-      <div class="panel-head"><h2>Valeur de ta position</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Coût${set?.rrp ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span></div>
+    <section class="hero detail-hero">
+      <div class="hero-top">
+        <div>
+          <span class="kicker">${pos.sold ? "Plus-value réalisée" : "Plus-value latente"}</span>
+          <strong class="big-num">${pos.priced ? fmtSigned(pos.gain) : "—"}</strong>
+          ${pos.priced ? `<span class="pill ${tone(pos.gain)}">${fmtPct(pos.pct)}</span>` : ""}
+          <span class="hero-sub">${pos.priced ? `${pos.sold ? "vendu" : "vaut"} ${fmtEur(pos.value)} · coût ${fmtEur(pos.cost)}` : "En attente du premier relevé de prix"}</span>
+        </div>
+        <span class="studs" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      </div>
       ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null,
         retail: set?.rrp && hist.length > 1 ? [{ on: hist[0].on, value: set.rrp * (Number(p.qty) || 1) }, { on: hist.at(-1).on, value: set.rrp * (Number(p.qty) || 1) }] : null,
         up: (pos.gain ?? 0) >= 0, label: "Valeur de la position",
         names: ["Valeur", "Coût", "Prix LEGO"], marks: pos.sold ? [{ on: p.soldDate, text: "vente" }] : [] })}
+      <div class="legend"><i class="lg-line"></i>Valeur de ta position <i class="lg-ref"></i>Coût${set?.rrp ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</div>
+      <div class="hero-grid two">
+        <div><span>Coût total</span><strong>${fmtEur(pos.cost, 2)}</strong><em>${p.qty} × ${fmtEur(p.unitPrice, 2)}${p.fees ? ` + ${fmtEur(p.fees, 2)} de frais` : ""}</em></div>
+        <div><span>Valeur par boîte</span><strong>${pos.unit != null ? fmtEur(pos.unit, 2) : "—"}</strong><em>${src === "manuel" ? `valeur encodée le ${fmtDate(last.on)}` : src ? `moyenne des ${src} BrickLink` : pos.sold ? "—" : "pas encore de prix"}</em></div>
+        <div><span>Rendement annualisé</span><strong class="${tone(pos.cagr)}">${fmtPct(pos.cagr)}</strong><em>${pos.cagr == null ? "après 6 mois de détention" : `depuis le ${fmtDate(p.date)}`}</em></div>
+        <div><span>${pos.sold ? "Vendu le" : "Acheté le"}</span><strong>${fmtDate(pos.sold ? p.soldDate : p.date)}</strong><em>${esc(pos.sold ? `acheté le ${fmtDate(p.date)}` : p.shop || "")}</em></div>
+      </div>
     </section>
     ${marketChart(p, rows)}
-    <section class="panel stats">
-      <div><span>Coût total</span><strong>${fmtEur(pos.cost, 2)}</strong><em>${p.qty} × ${fmtEur(p.unitPrice, 2)}${p.fees ? ` + ${fmtEur(p.fees, 2)} de frais` : ""}</em></div>
-      <div><span>Valeur par boîte</span><strong>${pos.unit != null ? fmtEur(pos.unit, 2) : "—"}</strong><em>${src === "manuel" ? `valeur encodée le ${fmtDate(last.on)}` : src ? `moyenne des ${src} BrickLink` : pos.sold ? "—" : "pas encore de prix"}</em></div>
-      <div><span>Rendement annualisé</span><strong class="${tone(pos.cagr)}">${fmtPct(pos.cagr)}</strong><em>${pos.cagr == null ? "après 6 mois de détention" : `depuis le ${fmtDate(p.date)}`}</em></div>
-      <div><span>${pos.sold ? "Vendu le" : "Acheté le"}</span><strong>${fmtDate(pos.sold ? p.soldDate : p.date)}</strong><em>${esc(pos.sold ? `acheté le ${fmtDate(p.date)}` : p.shop || "")}</em></div>
-    </section>
     ${trendPanel(p, pos)}
     ${legoPanel(p, set, pos)}
     ${market ? `<section class="panel">
