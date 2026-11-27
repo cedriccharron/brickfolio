@@ -7,10 +7,10 @@ import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmo
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
-  setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
+  setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA, parseAdvice, advicePrompt,
 } from "./invest.js";
 
-const VERSION = "0.11.0";
+const VERSION = "0.12.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -242,10 +242,9 @@ function viewPortfolio() {
 const verdictCls = (v) => (/acheter/i.test(v) ? "buy" : /passer/i.test(v) ? "pass" : "watch");
 function adviceBlock(c) {
   const a = S.opps.advice?.[c.setNo];
-  const busy = S.asking === c.setNo;
-  const btn = `<button class="btn ${a ? "ghost" : "primary"} small" data-action="opp-claude" data-v="${esc(c.setNo)}" ${S.asking ? "disabled" : ""}>
-    ${busy ? `<span class="spin">${icon("refresh", 16)}</span> Analyse en cours…` : a ? "Redemander à Claude" : "✦ Demander à Claude"}</button>`;
-  if (!a) return `<div class="advice empty">${btn}<p class="muted tiny">Analyse par Claude avec recherche web (remake, figurines exclusives, promos, sets comparables). Environ 0,10 à 0,20 € par avis, sur ta clé API.</p></div>`;
+  const ask = `<a class="btn ${a ? "ghost" : "primary"} small" href="${esc(claudeUrl(advicePrompt(c, todayIso())))}" target="_blank" rel="noopener" data-action="opp-claude-copy" data-v="${esc(c.setNo)}">✦ ${a ? "Redemander" : "Demander"} à Claude ↗</a>`;
+  const paste = `<button class="btn ghost small" data-action="opp-claude-paste" data-v="${esc(c.setNo)}">Coller la réponse</button>`;
+  if (!a) return `<div class="advice empty"><div class="opp-actions">${ask}${paste}</div><p class="muted tiny">Ouvre Claude (ton abonnement) avec la question toute prête et les chiffres du set. Colle ensuite sa réponse ici pour la garder.</p></div>`;
   return `<div class="advice">
     <div class="advice-head">
       <span class="advice-verdict ${verdictCls(a.verdict || "")}">${esc(a.verdict || "Avis")}</span>
@@ -256,8 +255,8 @@ function adviceBlock(c) {
     <details><summary>Lire l'analyse</summary><div class="advice-body">${adviceHtml(a.body)}</div>
       ${a.sources?.length ? `<p class="advice-src">Sources : ${a.sources.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title.slice(0, 50))}</a>`).join(" · ")}</p>` : ""}
     </details>
-    <p class="muted tiny">Avis du ${fmtDate(a.at)}${a.model ? ` · ${esc(a.model)}` : ""}${a.searches ? ` · ${a.searches} recherche${a.searches > 1 ? "s" : ""} web` : ""}</p>
-    ${btn}
+    <p class="muted tiny">Avis du ${fmtDate(a.at)}${a.model ? ` · ${esc(a.model)}` : ""}</p>
+    <div class="opp-actions">${ask}${paste}</div>
   </div>`;
 }
 
@@ -272,20 +271,42 @@ async function loadOpps() {
   finally { S.oppsLoading = false; if (route()[0] === "opps") render(); }
 }
 
-// Avis de Claude : envoie la fiche + la note de l'app (texte), garde la réponse en base.
-async function askClaude(c) {
-  if (S.asking) return;
-  S.asking = c.setNo; render();
-  toast("Claude analyse ce set (recherche web comprise)… 30 à 60 secondes", "info", { sticky: true });
-  const context = [`Note de l'application : ${c.score}/100${c.provisional ? " (provisoire)" : ""}`,
-    ...c.parts.map((p) => `- ${p.label} : ${p.points == null ? "inconnu" : `${p.points}/${p.max}`} (${p.detail})`),
-    c.owned ? "Le lecteur possède déjà ce set." : "", c.market != null ? `Marché BrickLink (moyenne vendue 6 mois, neuf) : ${Math.round(c.market)} €` : ""].filter(Boolean).join("\n");
-  try {
-    const a = await S.store.askClaude(c.setNo, context);
-    S.opps.advice = { ...(S.opps.advice || {}), [c.setNo]: a };
-    toast("Avis de Claude enregistré");
-  } catch (e) { toast(e.message, "error"); }
-  finally { S.asking = null; render(); }
+// Avis de Claude (v0.12) : question ouverte dans claude.ai (abonnement), réponse collée dans l'app et gardée en base.
+const claudeUrl = (prompt) => `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+function oppById(no) {
+  const owned = new Set(S.data.purchases.filter((p) => !isSold(p)).map((p) => p.setNo));
+  return rankCandidates(S.opps.catalog, { now: todayIso(), owned }).find((x) => x.setNo === no);
+}
+async function copyPrompt(no) {
+  const c = oppById(no);
+  if (!c) return;
+  try { await navigator.clipboard.writeText(advicePrompt(c, todayIso())); toast("Question copiée : si Claude s'ouvre sans elle, colle-la"); }
+  catch { /* presse-papiers refusé : le lien suffit */ }
+}
+function pasteAdviceDialog(no) {
+  const c = oppById(no);
+  const dlg = $("#dialog");
+  if (dlg.open) dlg.close();
+  dlg.innerHTML = `<form method="dialog" class="dlg">
+    <h2>Avis de Claude</h2>
+    <p class="muted small">${esc(c?.name || no)} · colle ici toute la réponse de Claude (elle commence par VERDICT, NOTE, PRIX MAX, RÉSUMÉ).</p>
+    <textarea name="advice" rows="10" class="advice-input" placeholder="VERDICT: …"></textarea>
+    <div class="dlg-actions"><button value="cancel" class="btn ghost">Annuler</button><button value="ok" class="btn primary">Enregistrer</button></div>
+  </form>`;
+  dlg.querySelector("form").addEventListener("submit", async (e) => {
+    if (e.submitter?.value !== "ok") return;
+    const text = dlg.querySelector("textarea").value.trim();
+    if (!text) return;
+    try {
+      const a = await S.store.saveAdvice(no, parseAdvice(text));
+      S.opps.advice = { ...(S.opps.advice || {}), [no]: a };
+      toast(a.verdict ? `Avis enregistré : ${a.verdict}` : "Avis enregistré (verdict non reconnu)");
+      render();
+    } catch (err) { toast(err.message, "error"); }
+  });
+  dlg.returnValue = "";
+  dlg.showModal();
+  setTimeout(() => dlg.querySelector("textarea")?.focus(), 50);
 }
 
 // Mise en forme simple de l'avis : paragraphes, listes « - », **gras**.
@@ -1039,11 +1060,8 @@ document.addEventListener("click", async (e) => {
   else if (a === "opp-open") { S.oppOpen = S.oppOpen === el.dataset.v ? null : el.dataset.v; render(); }
   else if (a === "opp-watch") { e.preventDefault(); toggleWatch(el.dataset.v); }
   else if (a === "opp-scan") scanOpps();
-  else if (a === "opp-claude") {
-    const owned = new Set(S.data.purchases.filter((p) => !isSold(p)).map((p) => p.setNo));
-    const c = rankCandidates(S.opps.catalog, { now: todayIso(), owned }).find((x) => x.setNo === el.dataset.v);
-    if (c) askClaude(c);
-  }
+  else if (a === "opp-claude-copy") copyPrompt(el.dataset.v); // le lien s'ouvre normalement
+  else if (a === "opp-claude-paste") pasteAdviceDialog(el.dataset.v);
   else if (a === "reverse") { S.f.reverse = !S.f.reverse; saveFilters(); render(); }
   else if (a === "reset-filters") { e.preventDefault(); for (const k of FILTER_KEYS) delete S.f[k]; saveFilters(); render(); }
   else if (a === "refresh") refreshPrices();

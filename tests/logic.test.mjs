@@ -2,10 +2,10 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary, candidateScore, rankCandidates,
+  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary, candidateScore, rankCandidates, parseAdvice, advicePrompt,
 } from "../js/invest.js";
 import {
-  pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset, parseAdvice,
+  pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset,
 } from "../supabase/functions/bricklink/bricklink.js";
 
 let n = 0;
@@ -389,6 +389,9 @@ await test("avis de Claude : lecture du format imposé", () => {
   assert.deepEqual([b.verdict, b.score, b.max_price], ["Acheter", 85, null]);
   const c = parseAdvice("Réponse libre sans format");
   assert.deepEqual([c.verdict, c.score, c.body], [null, null, "Réponse libre sans format"]);
+  const q = advicePrompt({ setNo: "75192-1", name: "Millennium Falcon", theme: "Star Wars", rrp: 849.99, avgSold: 675.4, qtySold: 40, score: 51, owned: true }, "2026-11-27");
+  assert.ok(q.includes("LEGO 75192 « Millennium Falcon »") && q.includes("675 €") && q.includes("51/100") && q.includes("VERDICT:"));
+  assert.ok(q.includes("Je possède déjà ce set."));
 });
 
 await test("message de fin de relevé : BrickLink et Brickset", () => {

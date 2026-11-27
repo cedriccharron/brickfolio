@@ -48,7 +48,7 @@ Brickfolio partage le projet Supabase de Cap'taine (`zzhzdiuoonhvxndmziju`) : le
 
 **Opportunités** (onglet du même nom) : chaque jour, la tâche `brickfolio-opportunites` (voir `supabase/cron.sql`) appelle l'action `scan` de la fonction. Une fois par semaine, elle parcourt le catalogue Brickset (environ 25 appels) et garde les sets dont le retrait est prévu dans les 4 mois (table `bf_catalog`) ; chaque jour, elle relève par lots leurs prix BrickLink. L'app classe ceux qui se retirent dans les 3 mois avec une note sur 100 (10 critères, détail en touchant un set). Le bouton ↻ de l'onglet lance un passage à la main.
 
-**Avis de Claude** (facultatif, payant) : crée une clé sur https://console.anthropic.com (facturation à l'usage, distincte de l'abonnement Claude), puis ajoute le secret `ANTHROPIC_API_KEY` dans *Edge Functions > Secrets*. Le bouton « Demander à Claude » d'une opportunité lance alors une analyse avec recherche web (environ 0,10 à 0,20 € par avis), gardée dans la table `bf_advice`. `ANTHROPIC_MODEL` permet de changer de modèle (par défaut `claude-opus-5-5`).
+**Avis de Claude** : dans le détail d'une opportunité, « Demander à Claude ↗ » ouvre claude.ai (ton abonnement) avec une question toute prête ; colle ensuite sa réponse avec « Coller la réponse » pour la garder (table `bf_advice`).
 
 **Reste à faire quand BrickLink est en ligne** : *Edge Functions > Secrets*, ajouter `BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`, `BRICKLINK_TOKEN_SECRET` (facultatif : `BRICKLINK_REGION`, par défaut `europe`). Tant qu'ils manquent, la fonction répond « Clés BrickLink absentes ».
 

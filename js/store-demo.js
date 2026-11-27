@@ -221,14 +221,11 @@ export function createDemoStore() {
       on ? w.add(setNo) : w.delete(setNo);
       localStorage.setItem(WATCH, JSON.stringify([...w]));
     },
-    async askClaude(setNo) {
-      await new Promise((r) => setTimeout(r, 1200));
-      const a = { setNo, at: new Date().toISOString(), model: "démo", verdict: "À surveiller", score: 64, maxPrice: 380,
-        summary: "Avis simulé : en mode démo, Claude n'est pas appelé.",
-        body: "Points forts :\n- Gamme recherchée et figurines exclusives\n- Retrait annoncé proche\n\nRisques :\n- Beaucoup de boîtes en circulation\n- Réédition possible\n\nPrix d'achat et horizon :\n- Acheter sous 380 € et garder 2 à 3 ans",
-        sources: [{ title: "Brickset", url: `https://brickset.com/sets/${setNo}` }], tokens: 0, searches: 0 };
-      const all = readJSON(ADVICE, {}); all[setNo] = a; localStorage.setItem(ADVICE, JSON.stringify(all));
-      return a;
+    async saveAdvice(setNo, a) {
+      const r = { setNo, at: new Date().toISOString(), model: "claude.ai", verdict: a.verdict, score: a.score, maxPrice: a.max_price,
+        summary: a.summary, body: a.body, sources: [], tokens: 0, searches: 0 };
+      const all = readJSON(ADVICE, {}); all[setNo] = r; localStorage.setItem(ADVICE, JSON.stringify(all));
+      return r;
     },
     async scanCatalog() {
       return { scanned: true, candidates: DEMO_OPPS.length, priced: 0, pending: 0, message: "Catalogue simulé (mode démo)" };

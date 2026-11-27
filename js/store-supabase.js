@@ -154,8 +154,9 @@ export async function createSupabaseStore() {
       if (on) must(await sb.from("bf_watch").upsert({ set_no: setNo }));
       else must(await sb.from("bf_watch").delete().eq("set_no", setNo));
     },
-    async askClaude(setNo, context) {
-      return adviceFromRow((await call({ action: "advice", set_no: setNo, context })).advice);
+    async saveAdvice(setNo, a) {
+      const row = { set_no: setNo, model: "claude.ai", verdict: a.verdict, score: a.score, max_price: a.max_price, summary: a.summary, body: a.body };
+      return adviceFromRow(must(await sb.from("bf_advice").insert(row).select().single()));
     },
     async scanCatalog(force = false) {
       return await call({ action: "scan", force });

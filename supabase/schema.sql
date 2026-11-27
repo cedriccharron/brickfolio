@@ -227,3 +227,7 @@ create index if not exists bf_advice_set on public.bf_advice (set_no, created_at
 alter table public.bf_advice enable row level security;
 drop policy if exists bf_advice_read on public.bf_advice;
 create policy bf_advice_read on public.bf_advice for select to authenticated using (public.is_owner());
+
+-- v0.12 : l'avis vient de claude.ai (abonnement), collé dans l'app par le propriétaire.
+drop policy if exists bf_advice_write on public.bf_advice;
+create policy bf_advice_write on public.bf_advice for insert to authenticated with check (public.is_owner());

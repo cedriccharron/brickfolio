@@ -202,22 +202,3 @@ export function isCandidate(row, from, to) {
   return (row.pieces || 0) >= 50;
 }
 
-// ---------- Avis de Claude (v0.11) : lecture de la réponse au format imposé ----------
-// VERDICT: … / NOTE: … / PRIX MAX: … / RÉSUMÉ: … puis l'analyse.
-export function parseAdvice(text) {
-  const t = String(text || "").trim();
-  const pick = (re) => t.match(re)?.[1]?.trim() || null;
-  const v = pick(/VERDICT\s*:\s*\**\s*(Acheter|À surveiller|A surveiller|Passer)/i);
-  const score = Number(pick(/NOTE\s*:\s*\**\s*(\d{1,3})/i));
-  const max = Number(String(pick(/PRIX MAX\s*:\s*\**\s*([\d\s.,]+)/i) || "").replace(/\s/g, "").replace(",", "."));
-  const summary = pick(/R[ÉE]SUM[ÉE]\s*:\s*\**\s*(.+)/i);
-  const body = t.replace(/^\**\s*(VERDICT|NOTE|PRIX MAX|R[ÉE]SUM[ÉE])\s*:.*$/gim, "").trim();
-  const verdict = v ? ({ acheter: "Acheter", passer: "Passer" }[v.toLowerCase()] || "À surveiller") : null;
-  return {
-    verdict,
-    score: Number.isFinite(score) && score >= 0 && score <= 100 && pick(/NOTE\s*:\s*\**\s*(\d{1,3})/i) != null ? score : null,
-    max_price: Number.isFinite(max) && max > 0 ? Math.round(max * 100) / 100 : null,
-    summary: summary ? summary.replace(/\*+$/, "").trim() : null,
-    body: body || t,
-  };
-}

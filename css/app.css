@@ -500,3 +500,5 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .tag.claude { background: #efe8ff; color: #5b3fb0; }
 .tag.claude.buy { background: #dff5e6; color: #0f6b34; }
 .tag.claude.pass { background: #fde2e0; color: #9b1c14; }
+.advice-input { width: 100%; font: inherit; font-size: 14px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); margin-bottom: 12px; resize: vertical; }
+.advice .opp-actions { margin-top: 4px; }

@@ -413,3 +413,45 @@ export function rankCandidates(catalog, { now = today(), days = 91, owned = new 
     .map((c) => ({ ...c, ...candidateScore(c, now), owned: owned.has(c.setNo), watched: watched.has(c.setNo) }))
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.daysLeft - b.daysLeft);
 }
+
+// ---------- Avis de Claude (v0.12) : lecture de la réponse collée depuis claude.ai (format imposé) ----------
+// VERDICT: … / NOTE: … / PRIX MAX: … / RÉSUMÉ: … puis l'analyse.
+export function parseAdvice(text) {
+  const t = String(text || "").trim();
+  const pick = (re) => t.match(re)?.[1]?.trim() || null;
+  const v = pick(/VERDICT\s*:\s*\**\s*(Acheter|À surveiller|A surveiller|Passer)/i);
+  const score = Number(pick(/NOTE\s*:\s*\**\s*(\d{1,3})/i));
+  const max = Number(String(pick(/PRIX MAX\s*:\s*\**\s*([\d\s.,]+)/i) || "").replace(/\s/g, "").replace(",", "."));
+  const summary = pick(/R[ÉE]SUM[ÉE]\s*:\s*\**\s*(.+)/i);
+  const body = t.replace(/^\**\s*(VERDICT|NOTE|PRIX MAX|R[ÉE]SUM[ÉE])\s*:.*$/gim, "").trim();
+  const verdict = v ? ({ acheter: "Acheter", passer: "Passer" }[v.toLowerCase()] || "À surveiller") : null;
+  return {
+    verdict,
+    score: Number.isFinite(score) && score >= 0 && score <= 100 && pick(/NOTE\s*:\s*\**\s*(\d{1,3})/i) != null ? score : null,
+    max_price: Number.isFinite(max) && max > 0 ? Math.round(max * 100) / 100 : null,
+    summary: summary ? summary.replace(/\*+$/, "").trim() : null,
+    body: body || t,
+  };
+}
+
+// Question à poser à Claude (claude.ai, abonnement de l'utilisateur) : fiche, marché et note de l'app, format de réponse imposé.
+export function advicePrompt(c, now = today()) {
+  const f = (k, v) => (v == null || v === "" ? null : `- ${k} : ${v}`);
+  const facts = [
+    f("Gamme", [c.theme, c.subtheme].filter(Boolean).join(" · ")), f("Pièces", c.pieces), f("Minifigs", c.minifigs),
+    f("Prix LEGO (LEGO.com DE)", c.rrp && `${c.rrp} €`), f("Sortie", c.launchDate), f("Retrait annoncé (Brickset)", c.exitDate),
+    f("Disponibilité", c.availability), f("Membres Brickset qui l'ont / le veulent", c.ownedBy != null ? `${c.ownedBy} / ${c.wantedBy}` : null),
+    f("Note des avis Brickset", c.rating && `${c.rating}/5`),
+    f("BrickLink neuf Europe, moyenne vendue 6 mois", c.avgSold != null ? `${Math.round(c.avgSold)} € (${c.qtySold ?? "?"} ventes)` : null),
+    f("BrickLink annonces en cours", c.qtyStock != null ? `${c.qtyStock} annonces, dès ${c.minStock != null ? Math.round(c.minStock) + " €" : "?"}` : null),
+    f("Note de mon application", c.score != null ? `${c.score}/100${c.provisional ? " (provisoire)" : ""}` : null),
+    c.owned ? "- Je possède déjà ce set." : null,
+  ].filter(Boolean);
+  return `Je suis un particulier en Belgique qui investit dans des sets LEGO neufs scellés (achat avant retrait, revente après, surtout sur BrickLink). ` +
+    `Est-ce un bon investissement d'acheter maintenant le set LEGO ${c.setNo.replace(/-1$/, "")} « ${c.name || c.setNo} » ? Nous sommes le ${now}.\n\n` +
+    `Données de mon application :\n${facts.join("\n")}\n\n` +
+    `Vérifie sur le web ce qui compte : date de retrait confirmée, remake ou nouvelle version annoncée, figurines exclusives, promos et meilleur prix d'achat actuel en Europe, ` +
+    `évolution de sets comparables après leur retrait, actualité de la licence. Sois factuel et prudent, sans promesse de rendement.\n\n` +
+    `Commence ta réponse EXACTEMENT par ces 4 lignes :\nVERDICT: Acheter | À surveiller | Passer\nNOTE: <0 à 100>\nPRIX MAX: <prix d'achat maximum conseillé par boîte en euros, nombre seul>\nRÉSUMÉ: <une phrase>\n` +
+    `Puis l'analyse en 150 à 250 mots avec des listes « - » : Points forts, Risques, Prix d'achat et horizon de revente.`;
+}
