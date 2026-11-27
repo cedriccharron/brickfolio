@@ -67,7 +67,7 @@ body.demo .demo-banner { display: block; text-align: center; font-size: 12px; fo
 /* Navigation bas */
 .nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(2, 1fr);
+  display: grid; grid-template-columns: repeat(3, 1fr);
   padding: 6px 4px calc(6px + var(--safe-b));
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
@@ -446,3 +446,33 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .opp-help summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .opp-help ul { padding-left: 18px; margin: 6px 0; }
 .opp-help p { margin: 6px 0; }
+
+/* Onglet Opportunités (v0.10) */
+.opp-hero { padding: 14px 16px; }
+.opp-intro { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: #5a4300; }
+.opp-chips { margin: 0 16px 10px; flex-wrap: wrap; row-gap: 6px; }
+.opp-chips .chip.on { color: var(--yellow); }
+.opp-list { list-style: none; margin: 0; padding: 0 16px; display: grid; gap: 10px; }
+.opp-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 3px 0 var(--line); overflow: hidden; }
+.opp-card .opp { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; padding: 12px; cursor: pointer; border-top: 0; }
+.opp-card .thumb { width: 56px; height: 56px; border: 0; }
+.opp-card .thumb img { background: transparent; mix-blend-mode: multiply; }
+.opp-card .thumb:has(img) .ic { display: none; }
+.opp-meta { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opp-flags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.opp-flags:empty { display: none; }
+.opp-score small { font-size: 9px; }
+.opp-detail { padding: 0 12px 12px; border-top: 1px dashed var(--line); }
+.crit { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
+.crit li { display: grid; grid-template-columns: minmax(0, 1fr) 64px 44px; gap: 8px; align-items: center; font-size: 13px; }
+.crit li.unknown { opacity: .55; }
+.crit-l { font-weight: 700; }
+.crit-l small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.crit-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.crit-bar i { display: block; height: 100%; background: var(--yellow); border-radius: 99px; box-shadow: inset 0 -2px 0 rgba(0,0,0,.08); }
+.crit-p { text-align: right; font-weight: 800; font-family: var(--round); font-variant-numeric: tabular-nums; }
+.crit-p small { font-weight: 400; color: var(--muted); }
+.opp-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.opp-help { margin-top: 16px; }
+.opp-img { position: relative; flex: none; width: 60px; height: 60px; border-radius: 14px; background: var(--tint, #fff4cc); overflow: hidden; }
+.opp-img .thumb.fill img { inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }

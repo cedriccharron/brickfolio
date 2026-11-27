@@ -7,10 +7,10 @@ import { esc, uuid, fmtEur, fmtSigned, fmtPct, tone, fmtDate, todayIso, parseAmo
 import {
   CONDITIONS, normalizeSetNo, isSold, position, positionHistory, portfolioHistory,
   pricesFor, unitValue, valueSource, SORTS, toCSV, analyze, stats, filterRows, sortRows, trends, splitSale, cost,
-  setStatus, vsRetail, refreshSummary, opportunities,
+  setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
 } from "./invest.js";
 
-const VERSION = "0.9.0";
+const VERSION = "0.10.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -88,6 +88,7 @@ function render() {
   let html, tab = null;
   if (!a) { html = viewPortfolio(); tab = "home"; }
   else if (a === "more") { html = viewMore(); tab = "more"; }
+  else if (a === "opps") { html = viewOpps(); tab = "opps"; }
   else if (a === "p" && b === "new") html = viewForm(null);
   else if (a === "p" && b && c === "edit") html = purchase(b) ? viewForm(purchase(b)) : notFound();
   else if (a === "p" && b) html = purchase(b) ? viewDetail(purchase(b)) : notFound();
@@ -205,8 +206,6 @@ function viewPortfolio() {
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
 
-    ${opportunityPanel(purchases, prices)}
-
     <div class="seg view-seg" role="tablist">
       ${[["held", `En stock (${counts.held})`], ["sold", `Vendus (${counts.sold})`], ["all", "Tout"]]
         .map(([k, l]) => `<button data-action="filter" data-v="${k}" class="${S.filter === k ? "on" : ""}">${l}</button>`).join("")}
@@ -239,39 +238,110 @@ function viewPortfolio() {
     <a class="fab" href="#/p/new" aria-label="Ajouter un achat">${icon("plus", 28)}</a>`;
 }
 
-// Opportunités : mes sets retirés dans les 3 mois, classés par note (faits mesurés aujourd'hui).
-function opportunityPanel(purchases, prices) {
-  const list = opportunities(purchases, prices, S.data.sets, todayIso());
-  if (!list.length) return "";
-  const pid = (no) => purchases.find((p) => p.setNo === no && !isSold(p))?.id;
-  const nameOf = (no) => setOf(no)?.name || purchases.find((p) => p.setNo === no)?.name || no;
-  const level = (sc) => (sc == null ? "none" : sc >= 60 ? "hi" : sc >= 35 ? "mid" : "lo");
-  const item = (o, i) => `<li><a class="opp" href="#/p/${pid(o.setNo)}">
-      <span class="opp-rank">${i + 1}</span>
-      ${thumb(o.setNo)}
-      <span class="grow">
-        <strong class="opp-name">${esc(nameOf(o.setNo))}</strong>
-        <span class="opp-when">Retrait le ${fmtDate(o.exitDate)} · ${o.daysLeft <= 0 ? "aujourd'hui" : `dans ${o.daysLeft} j`}</span>
-        ${o.score == null
-          ? `<span class="opp-line muted">En attente d'un relevé BrickLink</span>`
-          : `<span class="opp-line">Entrée ${fmtEur(o.entry)} <em>(${o.entryFrom})</em> → marché ${fmtEur(o.market)} <b class="${tone(o.margin)}">${fmtSigned(o.margin)}</b></span>
-             <span class="opp-line muted">Prix LEGO ${o.premium != null ? `<b class="${tone(o.premium)}">${fmtPct(o.premium)}</b>` : "—"} · ${o.qtySold ?? "?"} ventes / ${o.qtyStock ?? "?"} annonces</span>`}
-      </span>
-      <span class="opp-score ${level(o.score)}"><strong>${o.score ?? "—"}</strong><small>/100</small></span>
-    </a></li>`;
-  return `<section class="panel opps">
-    <div class="panel-head"><h2>${icon("trend", 18)} Opportunités</h2><span class="muted small">retrait dans 3 mois</span></div>
-    <ul>${list.map(item).join("")}</ul>
-    <details class="opp-help"><summary>Comment la note est calculée</summary>
-      <p>Uniquement des faits mesurés aujourd'hui, pas une prédiction :</p>
+// ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ---------------
+async function loadOpps() {
+  if (S.oppsLoading) return;
+  S.oppsLoading = true;
+  try { S.opps = await S.store.loadOpportunities(); S.oppsError = null; }
+  catch (e) { S.oppsError = e.message; }
+  finally { S.oppsLoading = false; if (route()[0] === "opps") render(); }
+}
+
+async function toggleWatch(no) {
+  const w = new Set(S.opps?.watched || []);
+  const on = !w.has(no);
+  on ? w.add(no) : w.delete(no);
+  S.opps.watched = [...w];
+  render();
+  try { await S.store.setWatched(no, on); toast(on ? "Set ajouté à ta liste" : "Set retiré de ta liste"); }
+  catch (e) { toast(e.message, "error"); await loadOpps(); }
+}
+
+async function scanOpps() {
+  if (S.busy) return;
+  S.busy = true; render();
+  toast("Recherche des opportunités en cours…", "info", { sticky: true });
+  try { const r = await S.store.scanCatalog(); await loadOpps(); toast(r.message || "Opportunités à jour"); }
+  catch (e) { toast(e.message, "error"); }
+  finally { S.busy = false; render(); }
+}
+
+function viewOpps() {
+  const busyBtn = `<button class="icon-btn" data-action="opp-scan" aria-label="${S.busy ? "Recherche en cours" : "Mettre à jour les opportunités"}" ${S.busy ? "disabled aria-busy=\"true\"" : ""}><span class="${S.busy ? "spin" : ""}">${icon("refresh")}</span></button>`;
+  if (!S.opps) {
+    if (!S.oppsError) loadOpps();
+    return `${top("Opportunités", { sub: "Sets retirés dans les 3 mois", actions: busyBtn })}
+      ${S.oppsError ? `<div class="empty"><p>${esc(S.oppsError)}</p><button class="btn primary" data-action="opp-scan">Réessayer</button></div>` : `<div class="loading">Chargement…</div>`}`;
+  }
+  const owned = new Set(S.data.purchases.filter((p) => !isSold(p)).map((p) => p.setNo));
+  const watched = new Set(S.opps.watched);
+  let list = rankCandidates(S.opps.catalog, { now: todayIso(), owned, watched });
+  const counts = { all: list.length, watched: list.filter((c) => c.watched).length, owned: list.filter((c) => c.owned).length };
+  const f = S.oppFilter || "all";
+  if (f === "watched") list = list.filter((c) => c.watched);
+  if (f === "owned") list = list.filter((c) => c.owned);
+  if (S.oppSort === "date") list = [...list].sort((a, b) => a.daysLeft - b.daysLeft || (b.score ?? -1) - (a.score ?? -1));
+  const level = (sc) => (sc == null ? "none" : sc >= 60 ? "hi" : sc >= 40 ? "mid" : "lo");
+  const sub = S.opps.scannedAt ? `Catalogue Brickset du ${fmtDate(S.opps.scannedAt)} · ${counts.all} sets` : "Catalogue pas encore parcouru";
+
+  const card = (c, i) => {
+    const open = S.oppOpen === c.setNo;
+    const buy = `#/p/new?set=${encodeURIComponent(c.setNo)}${c.rrp ? `&price=${c.rrp}` : ""}`;
+    return `<li class="opp-card ${open ? "open" : ""}">
+      <button class="opp" data-action="opp-open" data-v="${esc(c.setNo)}" aria-expanded="${open}">
+        <span class="opp-rank">${i + 1}</span>
+        <span class="opp-img" style="--tint:${tint(c.setNo)}">${thumb(c.setNo, "fill")}</span>
+        <span class="grow">
+          <strong class="opp-name">${esc(c.name || c.setNo)}</strong>
+          <span class="opp-meta">${esc([c.setNo, c.theme, c.pieces ? `${c.pieces} pièces` : "", c.minifigs ? `${c.minifigs} fig.` : ""].filter(Boolean).join(" · "))}</span>
+          <span class="opp-when">Retrait le ${fmtDate(c.exitDate)} · dans ${Math.max(0, c.daysLeft)} j</span>
+          <span class="opp-line">${c.rrp ? `LEGO ${fmtEur(c.rrp)}` : "Prix LEGO inconnu"}${c.market != null ? ` → marché ${fmtEur(c.market)} <b class="${tone(c.premium)}">${fmtPct(c.premium)}</b>` : ` · <em>prix BrickLink à venir</em>`}</span>
+          <span class="opp-flags">${c.owned ? `<span class="tag qty">à toi</span>` : ""}${c.watched ? `<span class="tag retiring">★ surveillé</span>` : ""}${/exclusive/i.test(c.availability || "") ? `<span class="tag">exclusif LEGO</span>` : ""}</span>
+        </span>
+        <span class="opp-score ${level(c.score)}"><strong>${c.score ?? "—"}</strong><small>${c.provisional ? "provisoire" : "/100"}</small></span>
+      </button>
+      ${open ? `<div class="opp-detail">
+        <ul class="crit">${c.parts.map((p) => `<li class="${p.points == null ? "unknown" : ""}">
+          <span class="crit-l">${esc(p.label)}<small>${esc(p.detail)}</small></span>
+          <span class="crit-bar"><i style="width:${p.value == null ? 0 : Math.round(p.value * 100)}%"></i></span>
+          <span class="crit-p">${p.points == null ? "—" : String(p.points).replace(".", ",")}<small>/${p.max}</small></span></li>`).join("")}</ul>
+        <div class="opp-actions">
+          <button class="btn ghost small" data-action="opp-watch" data-v="${esc(c.setNo)}">${c.watched ? "★ Ne plus surveiller" : "☆ Surveiller"}</button>
+          <a class="btn primary small" href="${buy}">${icon("plus", 16)} Je l'achète</a>
+          <a class="btn ghost small" href="${blUrl(c.setNo)}" target="_blank" rel="noopener">BrickLink ↗</a>
+          ${c.bricksetUrl ? `<a class="btn ghost small" href="${esc(c.bricksetUrl)}" target="_blank" rel="noopener">Brickset ↗</a>` : ""}
+        </div>
+      </div>` : ""}
+    </li>`;
+  };
+
+  return `${top("Opportunités", { sub, actions: busyBtn })}
+    <section class="hero opp-hero">
+      <span class="kicker">Retrait dans les 3 mois</span>
+      <p class="opp-intro">Les sets qui vont quitter les rayons, classés par potentiel. Touche un set pour voir le détail de sa note.</p>
+    </section>
+    <div class="chips opp-chips">
+      ${[["all", `Tous (${counts.all})`], ["watched", `Surveillés (${counts.watched})`], ["owned", `Mes sets (${counts.owned})`]].map(([k, l]) => `<button class="chip ${f === k ? "on" : ""}" data-action="opp-filter" data-v="${k}">${l}</button>`).join("")}
+      <span class="chips-sep"></span>
+      ${[["score", "Par note"], ["date", "Par date"]].map(([k, l]) => `<button class="chip ${(S.oppSort || "score") === k ? "on" : ""}" data-action="opp-sort" data-v="${k}">${l}</button>`).join("")}
+    </div>
+    ${list.length ? `<ul class="opp-list">${list.map(card).join("")}</ul>`
+      : `<div class="empty"><p>${f === "all" ? (S.opps.scannedAt ? "Aucun set annoncé retiré dans les 3 mois." : "Le catalogue n'a pas encore été parcouru.") : "Aucun set dans cette liste."}</p>
+         ${f === "all" && !S.opps.scannedAt ? `<button class="btn primary" data-action="opp-scan">Parcourir le catalogue</button>` : ""}</div>`}
+    <details class="panel opp-help"><summary>Comment la note est calculée</summary>
+      <p>Uniquement des faits mesurés aujourd'hui, pas une prédiction. Chaque critère donne des points :</p>
       <ul>
-        <li><b>Écart (45 pts)</b> : marché (moyenne des ventes BrickLink sur 6 mois) comparé au prix d'entrée, le moins cher entre le prix LEGO et l'annonce BrickLink la moins chère.</li>
-        <li><b>Prime sur le prix LEGO (25 pts)</b> : le set se revend-il déjà au-dessus de son prix d'origine ?</li>
-        <li><b>Tension (30 pts)</b> : ventes sur 6 mois par annonce en ligne. Beaucoup de ventes pour peu de stock, c'est la rareté qui s'installe.</li>
+        <li><b>Gamme (15)</b> : réputation de la gamme chez les collectionneurs (Star Wars UCS, modulaires, Icons, Ideas en tête ; City, Friends, Duplo en bas).</li>
+        <li><b>Exclusivité (10)</b> : vendu seulement chez LEGO = plus rare après le retrait.</li>
+        <li><b>Minifigs (10)</b> : figurines pour 100 € (elles se revendent à part).</li>
+        <li><b>Prix par pièce (5)</b> et <b>gamme de prix (5)</b> : un set généreux, entre 80 et 500 €, se revend mieux.</li>
+        <li><b>Durée de vente (5)</b> : peu de temps en rayon = moins de boîtes en circulation.</li>
+        <li><b>Envie des collectionneurs (15)</b> : membres Brickset qui le veulent par rapport à ceux qui l'ont, et note des avis.</li>
+        <li><b>Prime (15)</b> et <b>tension (15)</b> : se revend-il déjà au-dessus du prix LEGO sur BrickLink ? Beaucoup de ventes pour peu d'annonces ?</li>
+        <li><b>Délai (5)</b> : un retrait proche est plus sûr (Brickset repousse souvent les dates).</li>
       </ul>
-      <p>Les promos en boutique ne sont pas prises en compte. Les dates de retrait viennent de Brickset et sont souvent repoussées.</p>
-    </details>
-  </section>`;
+      <p>Note « provisoire » : il manque des données (souvent le prix BrickLink, relevé au fil des jours) ; elle est calculée sur les critères connus. Le catalogue est parcouru chaque semaine, les prix BrickLink chaque jour par lots. Les promos en boutique ne sont pas prises en compte.</p>
+    </details>`;
 }
 
 // Potentiel du stock affiché (après filtres)
@@ -507,6 +577,12 @@ function viewForm(p) {
   const selling = location.hash.includes("?sell");
   if (!S.draft || S.draft.id !== (p?.id || "new")) {
     S.draft = p ? { ...p, id: p.id, found: setOf(p.setNo), sold: isSold(p) || selling } : newDraft();
+    const q = new URLSearchParams(location.hash.split("?")[1] || "");
+    if (!p && q.get("set")) { // « Je l'achète » depuis les opportunités
+      const c = S.opps?.catalog.find((x) => x.setNo === q.get("set"));
+      Object.assign(S.draft, { setNo: q.get("set"), unitPrice: q.get("price") || "", name: c?.name || "",
+        found: c ? { setNo: c.setNo, name: c.name, year: c.year, image: c.image } : null });
+    }
   }
   const d = S.draft;
   const v = (x) => (x == null ? "" : esc(String(x).replace(".", ",")));
@@ -892,6 +968,11 @@ document.addEventListener("click", async (e) => {
   if (a === "filter") { S.filter = el.dataset.v; render(); }
   else if (a === "period") { S.f.period = el.dataset.v; saveFilters(); render(); }
   else if (a === "chart-view") { S.f.chart = el.dataset.v; saveFilters(); render(); }
+  else if (a === "opp-filter") { S.oppFilter = el.dataset.v; render(); }
+  else if (a === "opp-sort") { S.oppSort = el.dataset.v; render(); }
+  else if (a === "opp-open") { S.oppOpen = S.oppOpen === el.dataset.v ? null : el.dataset.v; render(); }
+  else if (a === "opp-watch") { e.preventDefault(); toggleWatch(el.dataset.v); }
+  else if (a === "opp-scan") scanOpps();
   else if (a === "reverse") { S.f.reverse = !S.f.reverse; saveFilters(); render(); }
   else if (a === "reset-filters") { e.preventDefault(); for (const k of FILTER_KEYS) delete S.f[k]; saveFilters(); render(); }
   else if (a === "refresh") refreshPrices();

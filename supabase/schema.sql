@@ -155,3 +155,53 @@ alter table public.sets add column if not exists launch_date  date;
 alter table public.sets add column if not exists exit_date    date;
 alter table public.sets add column if not exists brickset_url text;
 alter table public.sets add column if not exists brickset_at  timestamptz;
+
+-- ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ----------
+-- Écrits par la fonction « bricklink » (action « scan ») : fiche Brickset + dernier relevé BrickLink (neuf).
+-- Tables préfixées bf_ pour ne pas gêner l'autre application du projet.
+create table if not exists public.bf_catalog (
+  set_no        text primary key,              -- numéro BrickLink, ex. 75192-1
+  name          text not null,
+  year          int,
+  image_url     text,
+  theme         text,
+  theme_group   text,
+  subtheme      text,
+  category      text,
+  pieces        int,
+  minifigs      int,
+  rrp_eur       numeric(10,2),                 -- prix LEGO.com Allemagne
+  launch_date   date,
+  exit_date     date,
+  availability  text,                          -- « LEGO exclusive », « Retail », « Retail - limited »…
+  rating        numeric(3,1),                  -- note des avis Brickset (sur 5)
+  review_count  int,
+  owned_by      int,                           -- membres Brickset qui l'ont
+  wanted_by     int,                           -- membres Brickset qui le veulent
+  brickset_url  text,
+  seen_at       timestamptz not null default now(),  -- dernier passage du balayage Brickset
+  price_on      date,                          -- dernier relevé BrickLink (neuf, Europe)
+  avg_sold      numeric(10,2),
+  qty_sold      int,
+  avg_stock     numeric(10,2),
+  min_stock     numeric(10,2),
+  qty_stock     int,
+  price_error   text
+);
+create index if not exists bf_catalog_exit on public.bf_catalog (exit_date);
+
+-- Sets surveillés (par compte).
+create table if not exists public.bf_watch (
+  owner       uuid not null default auth.uid() references auth.users on delete cascade,
+  set_no      text not null,
+  created_at  timestamptz not null default now(),
+  primary key (owner, set_no)
+);
+
+alter table public.bf_catalog enable row level security;
+alter table public.bf_watch   enable row level security;
+drop policy if exists bf_catalog_read on public.bf_catalog;
+create policy bf_catalog_read on public.bf_catalog for select to authenticated using (public.is_owner());
+drop policy if exists bf_watch_rw on public.bf_watch;
+create policy bf_watch_rw on public.bf_watch for all to authenticated
+  using (owner = auth.uid() and public.is_owner()) with check (owner = auth.uid() and public.is_owner());

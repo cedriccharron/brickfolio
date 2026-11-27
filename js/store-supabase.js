@@ -50,6 +50,15 @@ const setFromRow = (r) => ({
   bricksetUrl: r.brickset_url || null, bricksetAt: r.brickset_at || null,
 });
 
+// Opportunités (v0.10) : ligne de bf_catalog → fiche
+const catalogFromRow = (r) => ({
+  setNo: r.set_no, name: r.name, year: r.year, image: r.image_url, theme: r.theme, themeGroup: r.theme_group, subtheme: r.subtheme,
+  pieces: r.pieces, minifigs: r.minifigs, rrp: n(r.rrp_eur), launchDate: r.launch_date, exitDate: r.exit_date,
+  availability: r.availability, rating: n(r.rating), reviewCount: r.review_count, ownedBy: r.owned_by, wantedBy: r.wanted_by,
+  bricksetUrl: r.brickset_url, seenAt: r.seen_at, priceOn: r.price_on, priceError: r.price_error,
+  avgSold: n(r.avg_sold), qtySold: r.qty_sold, avgStock: n(r.avg_stock), minStock: n(r.min_stock), qtyStock: r.qty_stock,
+});
+
 export async function createSupabaseStore() {
   if (!window.supabase) await loadScript("js/vendor/supabase.js");
   const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
@@ -120,6 +129,25 @@ export async function createSupabaseStore() {
         if (cached) return { ...cached, offline: true };
         throw e;
       }
+    },
+
+    // Opportunités : catalogue des sets dont le retrait approche + sets surveillés
+    async loadOpportunities() {
+      const today = new Date().toISOString().slice(0, 10);
+      const [cat, watch] = await Promise.all([
+        sb.from("bf_catalog").select("*").gte("exit_date", today).order("exit_date"),
+        sb.from("bf_watch").select("set_no"),
+      ]);
+      const catalog = must(cat).map(catalogFromRow);
+      return { catalog, watched: must(watch).map((r) => r.set_no),
+        scannedAt: catalog.reduce((m, c) => (!m || c.seenAt > m ? c.seenAt : m), null) };
+    },
+    async setWatched(setNo, on) {
+      if (on) must(await sb.from("bf_watch").upsert({ set_no: setNo }));
+      else must(await sb.from("bf_watch").delete().eq("set_no", setNo));
+    },
+    async scanCatalog(force = false) {
+      return await call({ action: "scan", force });
     },
 
     async savePurchase(p) {

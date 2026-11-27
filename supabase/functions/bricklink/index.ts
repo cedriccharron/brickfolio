@@ -3,6 +3,8 @@
 //
 //  POST {"action":"lookup","set_no":"75192-1"}  → fiche du set (nom, année, image), mise en cache dans « sets ».
 //  POST {"action":"refresh"}                    → complète les fiches Brickset, puis relève les prix de tous les sets détenus (« prices »).
+//  POST {"action":"scan"}                       → opportunités : balaie le catalogue Brickset (une fois par semaine) et relève
+//                                                 les prix BrickLink des sets dont le retrait approche (« bf_catalog »).
 //
 // Appelants autorisés : un compte de la liste public.owners (bouton de l'app), ou la tâche
 // planifiée (en-tête x-cron-secret, vérifié dans le coffre Supabase). Déployer avec « Verify JWT » désactivé
@@ -12,7 +14,7 @@
 // BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET ; facultatif : BRICKLINK_REGION (europe).
 // Brickset (prix LEGO d'origine, dates de sortie et de retrait) : BRICKSET_API_KEY. Chaque source marche sans l'autre.
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { blGet, bsGetSet, mergeSet, needsBrickset, parseBrickset, parseItem, priceGuide } from "./bricklink.js";
+import { blGet, bsGetSet, bsGetSets, isCandidate, mergeSet, needsBrickset, parseBrickset, parseCatalog, parseItem, priceGuide } from "./bricklink.js";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const keys = {
@@ -161,6 +163,76 @@ async function refresh() {
   return { ok, failed: failed.length, skipped, total: pairs.length, message, brickset: cat.done, bricklink: hasBrickLink };
 }
 
+// ---------- Opportunités (v0.10) ----------
+const SCAN_YEARS = 10;         // sets sortis ces 10 dernières années (certains restent longtemps en vente)
+const SCAN_WINDOW_DAYS = 120;  // retrait dans les 4 prochains mois (l'app affiche les 3 prochains)
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+async function scan(force = false) {
+  const started = Date.now();
+  const today = new Date();
+  const from = iso(today), to = iso(new Date(today.getTime() + SCAN_WINDOW_DAYS * 86400000));
+  const notes: string[] = [];
+
+  // 1) Catalogue Brickset : une fois par semaine (environ 2 appels par année balayée).
+  let scanned = false, calls = 0, found = 0;
+  if (BRICKSET_KEY) {
+    const { data: last } = await admin.from("bf_catalog").select("seen_at").order("seen_at", { ascending: false }).limit(1);
+    const age = last?.[0] ? Date.now() - new Date(last[0].seen_at).getTime() : Infinity;
+    if (force || age > 6 * 86400000) {
+      const scanStart = new Date().toISOString();
+      const rows: Record<string, unknown>[] = [];
+      let complete = true;
+      try {
+        for (let y = today.getUTCFullYear() - SCAN_YEARS + 1; y <= today.getUTCFullYear(); y++) {
+          for (let page = 1; page <= 6; page++) {
+            const { sets } = await bsGetSets({ year: String(y), pageSize: 500, pageNumber: page, orderBy: "Number" }, BRICKSET_KEY);
+            calls++;
+            for (const s of sets) { const r = parseCatalog(s); if (isCandidate(r, from, to)) rows.push(r!); }
+            if (sets.length < 500) break;
+          }
+        }
+      } catch (e) { complete = false; notes.push((e as Error).message); }
+      const uniq = [...new Map(rows.map((r) => [r.set_no, r])).values()];
+      for (let i = 0; i < uniq.length; i += 200) {
+        const { error } = await admin.from("bf_catalog").upsert(uniq.slice(i, i + 200).map((r) => ({ ...r, seen_at: scanStart })));
+        if (error) throw error;
+      }
+      // Sets sortis de la fenêtre (retirés, ou date repoussée) : retirés de la liste, seulement après un balayage complet.
+      if (complete) await admin.from("bf_catalog").delete().lt("seen_at", scanStart);
+      scanned = complete; found = uniq.length;
+    }
+  } else notes.push("Brickset : clé absente");
+
+  // 2) Prix BrickLink (neuf, Europe) des candidats sans relevé de la semaine, les plus anciens d'abord.
+  let priced = 0, pending = 0;
+  const { data: todo } = await admin.from("bf_catalog").select("set_no, price_on")
+    .or(`price_on.is.null,price_on.lt.${iso(new Date(Date.now() - 6 * 86400000))}`)
+    .order("price_on", { ascending: true, nullsFirst: true }).order("exit_date", { ascending: true });
+  for (const c of hasBrickLink ? todo || [] : []) {
+    if (Date.now() - started > BUDGET_MS) break;
+    try {
+      const r = await priceGuide(c.set_no, "N", keys, { region: REGION });
+      await admin.from("bf_catalog").update({ price_on: iso(new Date()), avg_sold: r.avg_sold, qty_sold: r.qty_sold,
+        avg_stock: r.avg_stock, min_stock: r.min_stock, qty_stock: r.qty_stock, price_error: null }).eq("set_no", c.set_no);
+      priced++;
+    } catch (e) {
+      await admin.from("bf_catalog").update({ price_on: iso(new Date()), price_error: (e as Error).message.slice(0, 200) }).eq("set_no", c.set_no);
+    }
+    await sleep(PAUSE_MS);
+  }
+  pending = Math.max(0, (todo?.length || 0) - priced);
+  if (!hasBrickLink) notes.push("Prix BrickLink : clés absentes");
+  const { count } = await admin.from("bf_catalog").select("set_no", { count: "exact", head: true });
+  const message = [
+    scanned ? `Catalogue Brickset parcouru (${calls} appels) : ${found} sets dont le retrait approche` : "",
+    `${priced} prix BrickLink relevés`,
+    pending ? `${pending} à relever au prochain passage` : "",
+    ...notes,
+  ].filter(Boolean).join(". ");
+  return { scanned, candidates: count ?? 0, priced, pending, message };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST attendu" }, 405);
@@ -175,6 +247,7 @@ Deno.serve(async (req) => {
       return json({ set: await lookup(setNo) });
     }
     if (body.action === "refresh") return json(await refresh());
+    if (body.action === "scan") return json(await scan(body.force === true));
     return json({ error: "Action inconnue" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

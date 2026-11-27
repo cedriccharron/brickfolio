@@ -161,3 +161,43 @@ export function needsBrickset(row, now = new Date()) {
   }
   return age > 30 * DAY;
 }
+
+// ---------- Balayage du catalogue Brickset (opportunités, v0.10) ----------
+// Une page de getSets (500 sets au plus) : 1 appel sur le quota de 100 par jour.
+export async function bsGetSets(params, apiKey, fetchFn = fetch) {
+  const body = new URLSearchParams({ apiKey, userHash: "", params: JSON.stringify(params) });
+  const res = await fetchFn(`${BRICKSET_API}/getSets`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: body.toString(),
+  });
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Brickset : réponse illisible (HTTP ${res.status})`); }
+  if (data?.status !== "success") throw new Error(`Brickset : ${data?.message || `HTTP ${res.status}`}`);
+  return { matches: Number(data.matches) || 0, sets: data.sets || [] };
+}
+
+const num = (n) => (Number.isFinite(Number(n)) ? Number(n) : null);
+
+// Fiche Brickset → ligne de bf_catalog (fiche complète, avec les indices de demande des collectionneurs).
+export function parseCatalog(s) {
+  const b = parseBrickset(s);
+  if (!b) return null;
+  const rating = num(s.rating);
+  return {
+    set_no: b.set_no, name: b.name, year: b.year, image_url: b.image_url,
+    theme: b.theme, theme_group: s.themeGroup || null, subtheme: b.subtheme, category: s.category || null,
+    pieces: b.pieces, minifigs: b.minifigs, rrp_eur: b.rrp_eur, launch_date: b.launch_date, exit_date: b.exit_date,
+    availability: s.availability || null,
+    rating: rating > 0 ? Math.round(rating * 10) / 10 : null,
+    review_count: num(s.reviewCount),
+    owned_by: num(s.collections?.ownedBy),
+    wanted_by: num(s.collections?.wantedBy),
+    brickset_url: b.brickset_url,
+  };
+}
+
+// Set candidat : vrai set (pas un livre, un porte-clés…), avec une date de retrait dans la fenêtre [from, to].
+export function isCandidate(row, from, to) {
+  if (!row?.exit_date || row.exit_date < from || row.exit_date > to) return false;
+  if (row.category && !/^normal$/i.test(row.category)) return false;
+  return (row.pieces || 0) >= 50;
+}

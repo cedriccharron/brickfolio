@@ -40,3 +40,23 @@ select cron.schedule(
 -- Vérifier : select jobname, schedule from cron.job;
 -- Historique : select * from cron.job_run_details order by start_time desc limit 5;
 -- Résultat des relevés : select * from public.runs order by id desc limit 5;
+
+-- Opportunités (v0.10) : chaque jour à 4 h 30 UTC. Le catalogue Brickset n'est parcouru qu'une fois par semaine
+-- (la fonction le vérifie) ; les prix BrickLink des sets candidats sont relevés par lots, jour après jour.
+select cron.unschedule('brickfolio-opportunites') where exists (select 1 from cron.job where jobname = 'brickfolio-opportunites');
+
+select cron.schedule(
+  'brickfolio-opportunites',
+  '30 4 * * *',
+  $$
+  select net.http_post(
+    url     := 'https://<PROJET>.supabase.co/functions/v1/bricklink',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'brickfolio_cron_secret')
+    ),
+    body    := '{"action":"scan"}'::jsonb,
+    timeout_milliseconds := 150000
+  );
+  $$
+);

@@ -26,6 +26,22 @@ export const DEMO_CATALOG = {
   "10300-1": { name: "Back to the Future Time Machine", year: 2022, retail: 169.99, growth: 0.09, theme: "Icons", pieces: 1872, launch: "2022-04-01", exit: "2025-12-31" },
   "42143-1": { name: "Ferrari Daytona SP3", year: 2022, retail: 399.99, growth: 0.04, theme: "Technic", pieces: 3778, launch: "2022-06-01", exit: "2025-12-31" },
 };
+// Opportunités simulées : [n°, nom, gamme, sous-gamme, disponibilité, minifigs, pièces, prix LEGO, sortie, retrait dans (jours),
+//  membres qui le veulent, qui l'ont, note, moyenne vendue BrickLink, ventes 6 mois, annonces]
+const DEMO_OPPS = [
+  ["75192-1", "Millennium Falcon - UCS (2nd edition)", "Star Wars", "Ultimate Collector Series", "LEGO exclusive", 8, 7541, 849.99, "2017-10-01", 34, 9100, 15200, 4.8, 905, 41, 22],
+  ["75313-1", "AT-AT - UCS", "Star Wars", "Ultimate Collector Series", "LEGO exclusive", 9, 6785, 849.99, "2021-11-26", 80, 6200, 7400, 4.6, 820, 28, 15],
+  ["10316-1", "Rivendell", "Icons", "", "Retail", 15, 6167, 499.99, "2023-03-08", 34, 7800, 9800, 4.9, 560, 35, 40],
+  ["76417-1", "Gringotts Wizarding Bank - Collectors' Edition", "Harry Potter", "", "LEGO exclusive", 13, 4801, 429.99, "2023-06-01", 55, 5100, 6300, 4.5, 455, 22, 30],
+  ["10312-1", "Jazz Club", "Icons", "Modular Buildings", "Retail", 8, 2899, 229.99, "2023-01-01", 34, 4300, 8900, 4.7, 245, 30, 45],
+  ["21343-1", "Viking Village", "Ideas", "", "Retail", 7, 2103, 139.99, "2023-08-01", 63, 3900, 6100, 4.6, 150, 26, 38],
+  ["42154-1", "2022 Ford GT", "Technic", "", "Retail", 0, 1466, 119.99, "2022-03-01", 70, 900, 4200, 4.2, 112, 18, 60],
+  ["60380-1", "Downtown", "City", "", "Retail", 14, 2010, 199.99, "2023-06-01", 34, 700, 2600, 4.1, 168, 9, 55],
+  ["41757-1", "Botanical Garden", "Friends", "", "Retail", 7, 1072, 99.99, "2023-03-01", 85, 300, 1900, 4.0, 82, 6, 48],
+  ["10331-1", "Kingfisher Bird", "Icons", "", "Retail", 0, 834, 49.99, "2024-01-01", 48, 1100, 3500, 4.3, null, null, null],
+];
+const WATCH = "brickfolio-demo-surveilles";
+const readJSON = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } };
 const image = (no) => `https://img.bricklink.com/ItemImage/SN/0/${no}.png`;
 const setInfo = (no) => {
   const c = DEMO_CATALOG[no];
@@ -188,6 +204,24 @@ export function createDemoStore() {
       d.lastRun = { finished_at: new Date().toISOString(), message: `${ok} relevé(s) simulé(s)` };
       write(d);
       return { ok, failed: 0, total: pairs.length, message: d.lastRun.message };
+    },
+    // Opportunités (démo) : catalogue simulé, dates de retrait calées sur aujourd'hui
+    async loadOpportunities() {
+      const plus = (d) => { const x = new Date(); x.setDate(x.getDate() + d); return iso(x); };
+      const catalog = DEMO_OPPS.map(([setNo, name, theme, subtheme, availability, minifigs, pieces, rrp, launch, inDays, wantedBy, ownedBy, rating, avgSold, qtySold, qtyStock]) => ({
+        setNo, name, image: image(setNo), theme, subtheme, availability, minifigs, pieces, rrp, launchDate: launch, exitDate: plus(inDays),
+        wantedBy, ownedBy, rating, avgSold, avgStock: avgSold && Math.round(avgSold * 1.08), minStock: avgSold && Math.round(avgSold * 0.93),
+        qtySold, qtyStock, priceOn: avgSold ? iso(new Date()) : null, bricksetUrl: `https://brickset.com/sets/${setNo}`, seenAt: new Date().toISOString(),
+      }));
+      return { catalog, watched: readJSON(WATCH, []), scannedAt: new Date().toISOString() };
+    },
+    async setWatched(setNo, on) {
+      const w = new Set(readJSON(WATCH, []));
+      on ? w.add(setNo) : w.delete(setNo);
+      localStorage.setItem(WATCH, JSON.stringify([...w]));
+    },
+    async scanCatalog() {
+      return { scanned: true, candidates: DEMO_OPPS.length, priced: 0, pending: 0, message: "Catalogue simulé (mode démo)" };
     },
     reset() { localStorage.removeItem(KEY); localStorage.removeItem(INVOICES); },
   };

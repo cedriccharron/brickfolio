@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeSetNo, cost, unitValue, latestPrice, annualized, position, summary, positionHistory, portfolioHistory, toCSV,
-  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary, opportunities, opportunityScore,
+  manualRow, valueSource, splitSale, trend, trends, analyze, stats, filterRows, sortRows, setStatus, vsRetail, refreshSummary, candidateScore, rankCandidates,
 } from "../js/invest.js";
 import {
   pct, oauthHeader, parseGuide, parseItem, decodeEntities, priceGuide, bsGetSet, parseBrickset, mergeSet, needsBrickset,
@@ -352,33 +352,30 @@ await test("historique : plus-value latente et réalisée", () => {
   assert.deepEqual(all.at(-1), { on: "2023-04-01", value: 0, invested: 0, retail: null, realized: 150, gain: 150 }); // tout vendu : reste la plus-value réalisée
 });
 
-await test("opportunités : sets retirés dans les 3 mois, classés par note", () => {
+await test("opportunités : note à 10 critères et classement", () => {
   const now = "2026-11-27";
-  const ps = [P({ id: "a", setNo: "75192-1" }), P({ id: "b", setNo: "10318-1", qty: 2 }), P({ id: "c", setNo: "10294-1" }),
-    P({ id: "d", setNo: "21318-1", soldPrice: 300, soldDate: "2024-01-01" }), P({ id: "e", setNo: "40000-1" })];
-  const sets = {
-    "75192-1": { rrp: 849.99, exitDate: "2026-12-31" },
-    "10318-1": { rrp: 399.99, exitDate: "2027-02-15" },
-    "10294-1": { rrp: 679.99, exitDate: "2027-06-30" }, // trop tard
-    "21318-1": { rrp: 249.99, exitDate: "2026-12-31" }, // vendu
-    "40000-1": { rrp: 49.99, exitDate: "2026-12-31" }, // pas encore de prix
-  };
-  const pr = [
-    { setNo: "75192-1", condition: "N", on: "2026-11-27", avgSold: 900, minStock: 820, qtySold: 40, qtyStock: 20 },
-    { setNo: "10318-1", condition: "N", on: "2026-11-27", avgSold: 380, minStock: 390, qtySold: 10, qtyStock: 40 },
-    { setNo: "10318-1", condition: "N", on: "2026-11-28", avgSold: 999, manual: true }, // valeur manuelle ignorée
-  ];
-  const o = opportunities(ps, pr, sets, now);
-  assert.deepEqual(o.map((x) => x.setNo), ["75192-1", "10318-1", "40000-1"]);
-  const [f, c, none] = o;
-  assert.deepEqual([f.entry, f.entryFrom, f.daysLeft], [820, "BrickLink", 34]);
-  assert.equal(Math.round(f.edge * 1000), 98); // (900 − 820) / 820
-  assert.equal(f.tension, 2);
-  assert.deepEqual([c.entry, c.entryFrom, c.boxes, c.market], [390, "BrickLink", 2, 380]);
-  assert.ok(f.score > c.score);
-  assert.equal(none.score, null);
-  assert.equal(opportunityScore({ edge: 0.6, premium: 0.5, tension: 1e9 }).score, 100);
-  assert.equal(opportunityScore({ edge: -0.5, premium: -0.5, tension: 0 }).score, 0);
+  const ucs = { setNo: "75192-1", name: "Falcon", theme: "Star Wars", subtheme: "Ultimate Collector Series", availability: "LEGO exclusive",
+    minifigs: 8, pieces: 7541, rrp: 849.99, launchDate: "2017-10-01", exitDate: "2026-12-31", wantedBy: 9000, ownedBy: 12000, rating: 4.8,
+    avgSold: 900, qtySold: 40, qtyStock: 20 };
+  const s = candidateScore(ucs, now);
+  const part = (k) => s.parts.find((p) => p.key === k);
+  assert.equal(part("theme").points, 15);
+  assert.equal(part("exclusive").points, 10);
+  assert.equal(part("shelf").points, 0); // 9 ans en rayon
+  assert.equal(part("timing").points, 4.8); // dans 34 j : proche
+  assert.equal(s.daysLeft, 34);
+  assert.equal(s.provisional, false);
+  assert.ok(s.score > 60 && s.score <= 100);
+  const city = { setNo: "60300-1", theme: "City", availability: "Retail", minifigs: 1, pieces: 150, rrp: 29.99,
+    launchDate: "2024-01-01", exitDate: "2027-02-20", wantedBy: 50, ownedBy: 900, avgSold: 22, qtySold: 3, qtyStock: 80 };
+  assert.ok(candidateScore(city, now).score < s.score);
+  const noPrice = candidateScore({ ...ucs, avgSold: null, avgStock: null, qtySold: null, qtyStock: null }, now);
+  assert.equal(noPrice.provisional, true); // prime et tension inconnues : note ramenée sur les 70 points connus
+  assert.equal(noPrice.parts.find((p) => p.key === "premium").points, null);
+  const list = rankCandidates([city, ucs, { ...city, setNo: "40000-1", availability: "LEGO Gift with Purchase" }, { ...city, setNo: "1-1", exitDate: "2027-06-30" }, { ...city, setNo: "2-1", exitDate: "2026-10-01" }],
+    { now, owned: new Set(["75192-1"]), watched: new Set(["60300-1"]) });
+  assert.deepEqual(list.map((x) => x.setNo), ["75192-1", "60300-1"]); // hors fenêtre écartés, mieux noté d'abord
+  assert.deepEqual([list[0].owned, list[1].watched], [true, true]);
 });
 
 await test("message de fin de relevé : BrickLink et Brickset", () => {

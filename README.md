@@ -46,6 +46,8 @@ Brickfolio partage le projet Supabase de Cap'taine (`zzhzdiuoonhvxndmziju`) : le
 
 **Brickset** (prix LEGO d'origine, dates de sortie et de retrait, thème, pièces) : demande une clé gratuite sur https://brickset.com/tools/webservices/requestkey (compte Brickset nécessaire), puis ajoute le secret `BRICKSET_API_KEY` dans *Edge Functions > Secrets*. Fonctionne sans BrickLink : la recherche d'un set et le bouton de relevé complètent alors les fiches. La clé gratuite permet 100 appels par jour : chaque fiche est demandée une fois, puis tous les 30 jours tant que le set n'est pas retiré (25 fiches au plus par relevé).
 
+**Opportunités** (onglet du même nom) : chaque jour, la tâche `brickfolio-opportunites` (voir `supabase/cron.sql`) appelle l'action `scan` de la fonction. Une fois par semaine, elle parcourt le catalogue Brickset (environ 25 appels) et garde les sets dont le retrait est prévu dans les 4 mois (table `bf_catalog`) ; chaque jour, elle relève par lots leurs prix BrickLink. L'app classe ceux qui se retirent dans les 3 mois avec une note sur 100 (10 critères, détail en touchant un set). Le bouton ↻ de l'onglet lance un passage à la main.
+
 **Reste à faire quand BrickLink est en ligne** : *Edge Functions > Secrets*, ajouter `BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`, `BRICKLINK_TOKEN_SECRET` (facultatif : `BRICKLINK_REGION`, par défaut `europe`). Tant qu'ils manquent, la fonction répond « Clés BrickLink absentes ».
 
 ### 3. Mettre en ligne (GitHub Pages)

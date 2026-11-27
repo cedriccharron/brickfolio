@@ -329,54 +329,88 @@ export function refreshSummary(r) {
   return { text: lines.join("\n"), error: !!r?.failed || bsError || r?.bricklink === false };
 }
 
-// ---------- Opportunités : sets détenus qui seront retirés bientôt -------------------------
-// Uniquement des faits mesurés aujourd'hui (pas de prédiction) :
-//  - prix d'entrée = le moins cher entre le prix LEGO d'origine et l'annonce BrickLink la moins chère ;
-//  - marché = prix moyen vendu sur 6 mois (sinon moyenne des annonces) ;
-//  - écart = (marché − entrée) / entrée : ce qu'on gagnerait en achetant aujourd'hui au prix d'entrée et en revendant au marché ;
-//  - prime = marché / prix LEGO − 1 : le set se revend-il déjà au-dessus de son prix d'origine ?
-//  - tension = ventes 6 mois / annonces en ligne : beaucoup de ventes pour peu de stock = rareté qui s'installe.
-// Note sur 100 : écart 45 pts, prime 25 pts, tension 30 pts.
+// ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ----------
+// Note sur 100 à partir de 10 critères mesurés aujourd'hui (pas de prédiction). Chaque critère vaut 0 à 1,
+// multiplié par son poids ; les critères inconnus (ex. pas encore de prix BrickLink) sont écartés et la note
+// est ramenée sur 100 avec les critères connus (« provisoire » s'il en manque).
+// Réputation des gammes : ce que constatent les collectionneurs, pas une garantie (modifiable ici).
+export const THEME_REPUTATION = {
+  "Star Wars": 0.9, "Harry Potter": 0.8, "Icons": 0.85, "Creator Expert": 0.85, "Ideas": 0.85, "The Lord of the Rings": 0.85,
+  "Marvel Super Heroes": 0.7, "Batman": 0.65, "DC Comics Super Heroes": 0.6, "Indiana Jones": 0.65, "Disney": 0.6,
+  "Technic": 0.6, "Architecture": 0.6, "Jurassic World": 0.5, "Ninjago": 0.55, "Botanical Collection": 0.5, "Botanicals": 0.5,
+  "Speed Champions": 0.45, "Creator": 0.45, "Avatar": 0.45, "Minecraft": 0.4, "Super Mario": 0.4, "Art": 0.3,
+  "City": 0.35, "Friends": 0.25, "Duplo": 0.15, "Dots": 0.15,
+};
+const SUBTHEME_BONUS = { "Ultimate Collector Series": 1, "Modular Buildings": 1, "Master Builder Series": 0.95 };
+const THEME_DEFAULT = 0.4;
+export const CRITERIA = [
+  { key: "theme", label: "Gamme", max: 15 },
+  { key: "exclusive", label: "Exclusivité", max: 10 },
+  { key: "minifigs", label: "Minifigs", max: 10 },
+  { key: "ppp", label: "Prix par pièce", max: 5 },
+  { key: "band", label: "Gamme de prix", max: 5 },
+  { key: "shelf", label: "Durée de vente", max: 5 },
+  { key: "desire", label: "Envie des collectionneurs", max: 15 },
+  { key: "premium", label: "Prime sur le prix LEGO", max: 15 },
+  { key: "tension", label: "Tension du marché", max: 15 },
+  { key: "timing", label: "Délai avant retrait", max: 5 },
+];
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
-export function opportunityScore({ edge, premium, tension }) {
-  const parts = {
-    edge: edge == null ? null : clamp01((edge + 0.2) / 0.8) * 45, // −20 % → 0, +60 % → 45
-    premium: premium == null ? null : clamp01((premium + 0.2) / 0.7) * 25, // −20 % → 0, +50 % → 25
-    tension: tension == null ? null : clamp01(tension / (tension + 1)) * 30, // 1 vente par annonce → 15
-  };
-  if (parts.edge == null) return { score: null, parts };
-  return { score: Math.round((parts.edge ?? 0) + (parts.premium ?? 0) + (parts.tension ?? 0)), parts };
+const lin = (x, a, b) => clamp01((x - a) / (b - a)); // 0 en a, 1 en b (a > b possible : décroissant)
+const pctTxt = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(Math.round(x * 100))} %`;
+const eur = (x) => `${Math.round(x)} €`;
+
+// c : fiche du catalogue (champs de bf_catalog en camelCase). Renvoie { score, provisional, parts, market, premium, daysLeft }.
+export function candidateScore(c, now = today()) {
+  const rrp = c.rrp > 0 ? Number(c.rrp) : null;
+  const market = c.avgSold ?? c.avgStock ?? null;
+  const v = {}, d = {};
+  // 1. Gamme (sous-gamme UCS / modulaires prioritaire)
+  const sub = SUBTHEME_BONUS[c.subtheme];
+  v.theme = sub ?? THEME_REPUTATION[c.theme] ?? THEME_DEFAULT;
+  d.theme = [c.theme, sub ? c.subtheme : ""].filter(Boolean).join(" · ") || "gamme inconnue";
+  // 2. Exclusivité
+  const av = String(c.availability || "");
+  v.exclusive = /exclusive/i.test(av) ? 1 : /limited/i.test(av) ? 0.8 : /promo/i.test(av) ? 0.7 : av ? 0.3 : null;
+  d.exclusive = av || "inconnue";
+  // 3. Minifigs : figurines pour 100 € (4 et plus = maximum)
+  if (rrp && c.minifigs != null) { const f = (c.minifigs * 100) / rrp; v.minifigs = clamp01(f / 4); d.minifigs = `${c.minifigs} figurine${c.minifigs > 1 ? "s" : ""} (${f.toFixed(1).replace(".", ",")} pour 100 €)`; }
+  else if (rrp && c.pieces) { v.minifigs = 0; d.minifigs = "aucune"; }
+  // 4. Prix par pièce : 8 centimes ou moins = maximum, 15 centimes ou plus = 0
+  if (rrp && c.pieces) { const ppp = rrp / c.pieces; v.ppp = lin(ppp, 0.15, 0.08); d.ppp = `${(ppp * 100).toFixed(1).replace(".", ",")} centimes par pièce`; }
+  // 5. Gamme de prix : 80 à 500 € idéal
+  if (rrp) { v.band = rrp >= 80 && rrp <= 500 ? 1 : (rrp >= 40 && rrp < 80) || (rrp > 500 && rrp <= 900) ? 0.6 : 0.2; d.band = `prix LEGO ${eur(rrp)}`; }
+  // 6. Durée de vente : 18 mois ou moins = maximum, 4 ans ou plus = 0
+  if (c.launchDate && c.exitDate) { const m = daysBetween(c.launchDate, c.exitDate) / 30.4; v.shelf = lin(m, 48, 18); d.shelf = `${Math.round(m)} mois en rayon`; }
+  // 7. Envie des collectionneurs : membres Brickset qui le veulent / qui l'ont, et note des avis
+  if (c.wantedBy != null && c.ownedBy != null) {
+    const r = c.wantedBy / Math.max(1, c.ownedBy);
+    const rating = c.rating ? lin(c.rating, 3.5, 5) : null;
+    v.desire = rating == null ? clamp01(r / 0.5) : clamp01(r / 0.5) * 0.7 + rating * 0.3;
+    d.desire = `${c.wantedBy} le veulent, ${c.ownedBy} l'ont${c.rating ? ` · avis ${String(c.rating).replace(".", ",")}/5` : ""}`;
+  }
+  // 8. Prime : se revend-il déjà au-dessus du prix LEGO ? (−20 % → 0, +50 % → max)
+  let premium = null;
+  if (rrp && market != null) { premium = market / rrp - 1; v.premium = lin(premium, -0.2, 0.5); d.premium = `marché ${eur(market)} (${pctTxt(premium)})`; }
+  // 9. Tension : ventes 6 mois par annonce en ligne (1 vente par annonce = moitié)
+  if (c.qtySold != null && c.qtyStock != null) { const t = c.qtySold / Math.max(1, c.qtyStock); v.tension = t / (t + 1); d.tension = `${c.qtySold} ventes / ${c.qtyStock} annonces`; }
+  // 10. Délai : proche = plus sûr (30 jours ou moins = maximum, 90 jours = 0,4)
+  const daysLeft = c.exitDate ? daysBetween(now, c.exitDate) : null;
+  if (daysLeft != null) { v.timing = daysLeft <= 30 ? 1 : Math.max(0.4, 1 - ((daysLeft - 30) / 60) * 0.6); d.timing = `retrait dans ${Math.max(0, daysLeft)} j`; }
+
+  const parts = CRITERIA.map((k) => ({ ...k, value: v[k.key] ?? null, points: v[k.key] == null ? null : Math.round(v[k.key] * k.max * 10) / 10, detail: d[k.key] || "inconnu" }));
+  const known = parts.filter((p) => p.points != null);
+  const maxKnown = known.reduce((a, p) => a + p.max, 0);
+  const score = maxKnown ? Math.round((known.reduce((a, p) => a + p.points, 0) / maxKnown) * 100) : null;
+  return { score, provisional: maxKnown < 100, parts, market, premium, daysLeft };
 }
 
-export function opportunities(purchases, prices, sets = {}, now = today(), days = 91) {
-  const limit = addDays(now, days);
-  const held = new Map(); // un set peut être détenu en plusieurs achats / états : le neuf d'abord
-  for (const p of purchases) {
-    if (isSold(p)) continue;
-    const cur = held.get(p.setNo);
-    if (!cur) held.set(p.setNo, { setNo: p.setNo, condition: p.condition, boxes: Number(p.qty) || 0 });
-    else { cur.boxes += Number(p.qty) || 0; if (p.condition === "N") cur.condition = "N"; }
-  }
-  const out = [];
-  for (const h of held.values()) {
-    const set = sets[h.setNo];
-    const exit = set?.exitDate;
-    if (!exit || exit < now || exit > limit) continue;
-    const row = [...pricesFor(prices, h.setNo, h.condition)].reverse().find((r) => !r.manual) || null;
-    const rrp = set.rrp > 0 ? Number(set.rrp) : null;
-    const minStock = row?.minStock > 0 ? Number(row.minStock) : null;
-    const market = row ? (row.avgSold ?? row.avgStock ?? null) : null;
-    const entryOpts = [rrp && { price: rrp, from: "LEGO" }, minStock && { price: minStock, from: "BrickLink" }].filter(Boolean);
-    const entry = entryOpts.length ? entryOpts.reduce((a, b) => (b.price < a.price ? b : a)) : null;
-    const edge = entry && market != null ? (market - entry.price) / entry.price : null;
-    const premium = rrp && market != null ? market / rrp - 1 : null;
-    const tension = row?.qtySold != null && row?.qtyStock != null ? row.qtySold / Math.max(1, row.qtyStock) : null;
-    const { score, parts } = opportunityScore({ edge, premium, tension });
-    const daysLeft = Math.round((new Date(`${exit}T12:00:00Z`) - new Date(`${now}T12:00:00Z`)) / 86400000);
-    out.push({ setNo: h.setNo, condition: h.condition, boxes: h.boxes, exitDate: exit, daysLeft, rrp, market,
-      entry: entry?.price ?? null, entryFrom: entry?.from ?? null, edge, premium, tension,
-      qtySold: row?.qtySold ?? null, qtyStock: row?.qtyStock ?? null, margin: entry && market != null ? market - entry.price : null,
-      score, parts, priceOn: row?.on ?? null });
-  }
-  return out.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.daysLeft - b.daysLeft);
+// Liste classée : catalogue + sets détenus (repérés « à toi ») + surveillés, dans la fenêtre de « days » jours.
+export function rankCandidates(catalog, { now = today(), days = 91, owned = new Set(), watched = new Set() } = {}) {
+  const to = addDays(now, days);
+  return catalog
+    .filter((c) => c.exitDate && c.exitDate >= now && c.exitDate <= to)
+    .filter((c) => !/gift with purchase|reward/i.test(c.availability || "")) // cadeaux offerts : pas achetables
+    .map((c) => ({ ...c, ...candidateScore(c, now), owned: owned.has(c.setNo), watched: watched.has(c.setNo) }))
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.daysLeft - b.daysLeft);
 }
