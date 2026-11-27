@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA, parseAdvice, advicePrompt,
 } from "./invest.js";
 
-const VERSION = "0.13.0";
+const VERSION = "0.14.0";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -260,6 +260,10 @@ function adviceBlock(c) {
   </div>`;
 }
 
+// Page Brickwatch du set (prix en boutique et historique) : /fr-FR/set/<numéro>/<NOM>.html
+const brickwatchUrl = (c) => `https://www.brickwatch.net/fr-FR/set/${encodeURIComponent(c.setNo.replace(/-1$/, ""))}/${encodeURIComponent(
+  String(c.name || "set").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "SET")}.html`;
+
 // Recherche Google Shopping du set (numéro sans variante + nom) pour comparer les prix en boutique.
 const priceSearchUrl = (c) => `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(`LEGO ${c.setNo.replace(/-1$/, "")} ${c.name || ""}`.trim())}`;
 
@@ -365,6 +369,10 @@ function viewOpps() {
   const f = S.oppFilter || "all";
   if (f === "watched") list = list.filter((c) => c.watched);
   if (f === "owned") list = list.filter((c) => c.owned);
+  // Recherche : numéro, nom, gamme (sans accents ni casse) ; plusieurs mots = tous présents
+  const norm = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const words = norm(S.oppQ).split(/\s+/).filter(Boolean);
+  if (words.length) list = list.filter((c) => { const hay = norm(`${c.setNo} ${c.name} ${c.theme} ${c.subtheme}`); return words.every((w) => hay.includes(w)); });
   if (S.oppSort === "date") list = [...list].sort((a, b) => a.daysLeft - b.daysLeft || (b.score ?? -1) - (a.score ?? -1));
   const level = (sc) => (sc == null ? "none" : sc >= 60 ? "hi" : sc >= 40 ? "mid" : "lo");
   const sub = S.opps.scannedAt ? `Catalogue Brickset du ${fmtDate(S.opps.scannedAt)} · ${counts.all} sets` : "Catalogue pas encore parcouru";
@@ -395,6 +403,7 @@ function viewOpps() {
         <div class="opp-actions">
           <button class="btn ghost small" data-action="opp-watch" data-v="${esc(c.setNo)}">${c.watched ? "★ Ne plus surveiller" : "☆ Surveiller"}</button>
           <a class="btn primary small" href="${buy}">${icon("plus", 16)} Je l'achète</a>
+          <a class="btn small brickwatch" href="${brickwatchUrl(c)}" target="_blank" rel="noopener">Brickwatch ↗</a>
           <a class="btn ghost small" href="${priceSearchUrl(c)}" target="_blank" rel="noopener">${icon("search", 16)} Prix sur Google ↗</a>
           <a class="btn ghost small" href="${blUrl(c.setNo)}" target="_blank" rel="noopener">BrickLink ↗</a>
           ${c.bricksetUrl ? `<a class="btn ghost small" href="${esc(c.bricksetUrl)}" target="_blank" rel="noopener">Brickset ↗</a>` : ""}
@@ -408,12 +417,15 @@ function viewOpps() {
       <span class="kicker">Retrait dans les 3 mois</span>
       <p class="opp-intro">Les sets qui vont quitter les rayons, classés par potentiel. Touche un set pour voir le détail de sa note.</p>
     </section>
+    <label class="opp-search">${icon("search", 18)}<input type="search" data-opp-q value="${esc(S.oppQ || "")}" placeholder="N°, nom ou gamme du set" autocomplete="off" enterkeyhint="search"></label>
     <div class="chips opp-chips">
       ${[["all", `Tous (${counts.all})`], ["watched", `Surveillés (${counts.watched})`], ["owned", `Mes sets (${counts.owned})`]].map(([k, l]) => `<button class="chip ${f === k ? "on" : ""}" data-action="opp-filter" data-v="${k}">${l}</button>`).join("")}
       <span class="chips-sep"></span>
       ${[["score", "Par note"], ["date", "Par date"]].map(([k, l]) => `<button class="chip ${(S.oppSort || "score") === k ? "on" : ""}" data-action="opp-sort" data-v="${k}">${l}</button>`).join("")}
     </div>
     ${list.length ? `<ul class="opp-list">${list.map(card).join("")}</ul>`
+      : S.oppQ?.trim() ? `<div class="empty"><p>Aucun set ne correspond à « ${esc(S.oppQ.trim())} » parmi les sets retirés dans les 3 mois.</p>
+         <a class="btn ghost" href="https://brickset.com/search?query=${encodeURIComponent(S.oppQ.trim())}" target="_blank" rel="noopener">Chercher sur Brickset ↗</a></div>`
       : `<div class="empty"><p>${f === "all" ? (S.opps.scannedAt ? "Aucun set annoncé retiré dans les 3 mois." : "Le catalogue n'a pas encore été parcouru.") : "Aucun set dans cette liste."}</p>
          ${f === "all" && !S.opps.scannedAt ? `<button class="btn primary" data-action="opp-scan">Parcourir le catalogue</button>` : ""}</div>`}
     <details class="panel opp-help"><summary>Comment la note est calculée</summary>
@@ -1104,6 +1116,14 @@ document.addEventListener("click", async (e) => {
 
 // Filtres : listes (change) et recherche (input, en gardant le curseur dans le champ)
 document.addEventListener("input", (e) => {
+  if (e.target.dataset?.oppQ != null) { // recherche dans les opportunités
+    S.oppQ = e.target.value;
+    const pos = e.target.selectionStart;
+    render();
+    const el = $("[data-opp-q]");
+    if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch { /* type search */ } }
+    return;
+  }
   const k = e.target.dataset?.f;
   if (k !== "q") return;
   S.f.q = e.target.value; saveFilters();
