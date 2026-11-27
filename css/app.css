@@ -504,8 +504,6 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .advice .opp-actions { margin-top: 4px; }
 .crit li.cap .crit-p { color: var(--accent); }
 
-/* v0.14 : recherche dans les opportunités, lien Brickwatch vert */
+/* v0.14 : recherche dans les opportunités */
 .opp-search { display: flex; align-items: center; gap: 8px; margin: 0 16px 10px; padding: 0 12px; min-height: 46px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; color: var(--muted); }
 .opp-search input { flex: 1; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--ink); outline: none; min-height: 44px; padding: 0; }
-.btn.brickwatch { background: #1f9d55; border-color: #1f9d55; color: #fff; box-shadow: 0 3px 0 #157a40; }
-.btn.brickwatch:active { transform: translateY(2px); box-shadow: 0 1px 0 #157a40; }
