@@ -303,8 +303,8 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .c-hline { stroke: var(--ink-2); stroke-width: 1; opacity: .5; }
 .c-hdot { fill: var(--surface); stroke: var(--hero); stroke-width: 2; }
 .c-tip { fill: var(--hero); opacity: .94; }
-.c-tip-t, .c-tip-t2 { fill: var(--hero-ink); font-size: 10.5px; font-weight: 600; }
-.c-tip-t2 { font-weight: 400; opacity: .85; }
+.c-tip-t, .c-tip-t2, .c-tip-t3 { fill: var(--hero-ink); font-size: 10.5px; font-weight: 600; }
+.c-tip-t2, .c-tip-t3 { font-weight: 400; opacity: .85; }
 .chart-hint { margin: 4px 0 0; }
 .chips.period { margin: 8px 0 4px; flex-wrap: wrap; }
 
@@ -312,3 +312,8 @@ button.link { border: 0; background: none; color: var(--hero); text-decoration: 
 .tag.retired { background: #dff5e6; color: #0f6b34; vertical-align: 1px; }
 .tag.retiring { background: #fff1c7; color: #6b4e00; vertical-align: 1px; }
 .stats.lego { margin-top: 4px; }
+
+/* Repère « prix LEGO d'origine » dans les graphiques (v0.6.1) */
+:root { --retail: #c27c0e; }
+.c-retail { fill: none; stroke: var(--retail); stroke-width: 1.6; stroke-dasharray: 1.5 3.5; stroke-linecap: round; }
+.legend i.lg-retail { border-top: 2px dotted var(--retail); }

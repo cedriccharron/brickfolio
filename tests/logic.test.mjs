@@ -82,10 +82,10 @@ await test("historique du portefeuille", () => {
   const prices = [R("2023-02-01", 520), R("2023-04-01", 540)];
   const h = portfolioHistory(purchases, prices);
   assert.deepEqual(h, [
-    { on: "2023-01-01", value: 500, invested: 500 },
-    { on: "2023-02-01", value: 520, invested: 500 },
-    { on: "2023-03-01", value: 1040, invested: 800 },
-    { on: "2023-04-01", value: 1080, invested: 800 },
+    { on: "2023-01-01", value: 500, invested: 500, retail: null },
+    { on: "2023-02-01", value: 520, invested: 500, retail: null },
+    { on: "2023-03-01", value: 1040, invested: 800, retail: null },
+    { on: "2023-04-01", value: 1080, invested: 800, retail: null },
   ]);
 });
 
@@ -300,7 +300,12 @@ await test("Brickset : fusion avec la fiche BrickLink et rafraîchissement", () 
   assert.equal(needsBrickset({}, now), true);
   assert.equal(needsBrickset({ brickset_at: "2026-11-20T00:00:00Z" }, now), false);
   assert.equal(needsBrickset({ brickset_at: "2026-10-01T00:00:00Z" }, now), true);
-  assert.equal(needsBrickset({ brickset_at: "2026-10-01T00:00:00Z", exit_date: "2024-12-31" }, now), false); // retiré : figé
+  assert.equal(needsBrickset({ brickset_at: "2026-10-01T00:00:00Z", exit_date: "2024-12-31" }, now), false); // retiré depuis longtemps : figé
+  // Autour de la date de retrait (souvent repoussée) : chaque semaine, et encore 6 mois après
+  assert.equal(needsBrickset({ brickset_at: "2026-11-23T00:00:00Z", exit_date: "2026-12-31" }, now), false);
+  assert.equal(needsBrickset({ brickset_at: "2026-11-20T00:00:00Z", exit_date: "2026-12-31" }, now), true);
+  assert.equal(needsBrickset({ brickset_at: "2026-11-20T00:00:00Z", exit_date: "2026-10-31" }, now), true);
+  assert.equal(needsBrickset({ brickset_at: "2026-11-20T00:00:00Z", exit_date: "2027-12-31" }, now), false); // loin : 30 jours
 });
 
 await test("statut LEGO, comparaison au prix d'origine, filtre", () => {
@@ -322,6 +327,17 @@ await test("statut LEGO, comparaison au prix d'origine, filtre", () => {
   const csv = toCSV([P({})], [], sets);
   assert.ok(csv.includes('"Prix LEGO d\'origine";"Date de retrait"'));
   assert.ok(csv.includes('"629,99";"2025-12-31"'));
+});
+
+await test("historique : prix LEGO d'origine du stock", () => {
+  const ps = [P({ id: "a", qty: 2, date: "2024-01-01" }), P({ id: "b", setNo: "21318-1", date: "2024-06-01" })];
+  const pr = [R("2024-03-01", 600), { ...R("2024-07-01", 220), setNo: "21318-1" }];
+  const h = portfolioHistory(ps, pr, { "10294-1": { rrp: 629.99 }, "21318-1": { rrp: 199.99 } });
+  assert.equal(h[0].retail, 1259.98);
+  assert.equal(Math.round(h.at(-1).retail * 100) / 100, 1459.97);
+  const partial = portfolioHistory(ps, pr, { "10294-1": { rrp: 629.99 } });
+  assert.equal(partial.at(-1).retail, null); // une boîte sans prix d'origine : pas de total
+  assert.equal(portfolioHistory(ps, pr)[0].retail, null);
 });
 
 console.log(`\n${n} tests réussis`);

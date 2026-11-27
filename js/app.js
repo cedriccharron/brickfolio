@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail,
 } from "./invest.js";
 
-const VERSION = "0.6.0";
+const VERSION = "0.6.1";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -150,8 +150,10 @@ function viewPortfolio() {
   const g = stats(all); // tout le portefeuille, sans filtres
   const gain = g.held.value - g.held.invested;
   const period = PERIODS[S.f.period] ? S.f.period : "all";
-  let hist = portfolioHistory(purchases, prices);
+  let hist = portfolioHistory(purchases, prices, S.data.sets);
   if (PERIODS[period][1]) hist = hist.filter((h) => h.on >= cutoff(PERIODS[period][1]));
+  // Prix LEGO d'origine du stock : affiché seulement si toutes les boîtes en ont un (sinon la comparaison tromperait)
+  const retail = hist.length && hist.every((h) => h.retail != null) ? hist.map((h) => ({ on: h.on, value: h.retail })) : null;
   const rows = viewRows(all);
   const st = stats(rows);
   const counts = { held: all.filter((r) => !r.pos.sold).length, sold: all.filter((r) => r.pos.sold).length };
@@ -178,9 +180,9 @@ function viewPortfolio() {
       ${g.held.unpriced ? `<p class="hero-note">${g.held.unpriced} set(s) sans prix encore : comptés à leur prix d'achat.</p>` : ""}
     </section>
     <section class="panel">
-      <div class="panel-head"><h2>Évolution passée</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi</span></div>
+      <div class="panel-head"><h2>Évolution passée</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Investi${retail ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span></div>
       <div class="chips period">${Object.entries(PERIODS).map(([k, [l]]) => `<button class="chip ${period === k ? "on" : ""}" data-action="period" data-v="${k}">${l}</button>`).join("")}</div>
-      ${lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), up: gain >= 0, label: "Valeur du portefeuille" })}
+      ${lineChart({ main: hist.map((h) => ({ on: h.on, value: h.value })), ref: hist.map((h) => ({ on: h.on, value: h.invested })), retail, up: gain >= 0, label: "Valeur du portefeuille" })}
       <p class="muted tiny chart-hint">Glisse le doigt sur la courbe pour lire la valeur à une date. La courbe commence à ton premier achat ; la valeur du marché n'est connue qu'à partir du premier relevé de prix.</p>
     </section>
 
@@ -304,9 +306,11 @@ function viewDetail(p) {
       </div>
     </div>
     <section class="panel">
-      <div class="panel-head"><h2>Valeur de ta position</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Coût</span></div>
-      ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null, up: (pos.gain ?? 0) >= 0, label: "Valeur de la position",
-        names: ["Valeur", "Coût"], marks: pos.sold ? [{ on: p.soldDate, text: "vente" }] : [] })}
+      <div class="panel-head"><h2>Valeur de ta position</h2><span class="legend"><i class="lg-line"></i>Valeur <i class="lg-ref"></i>Coût${set?.rrp ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span></div>
+      ${lineChart({ main: hist, ref: hist.length > 1 ? [{ on: hist[0].on, value: pos.cost }, { on: hist.at(-1).on, value: pos.cost }] : null,
+        retail: set?.rrp && hist.length > 1 ? [{ on: hist[0].on, value: set.rrp * (Number(p.qty) || 1) }, { on: hist.at(-1).on, value: set.rrp * (Number(p.qty) || 1) }] : null,
+        up: (pos.gain ?? 0) >= 0, label: "Valeur de la position",
+        names: ["Valeur", "Coût", "Prix LEGO"], marks: pos.sold ? [{ on: p.soldDate, text: "vente" }] : [] })}
     </section>
     ${marketChart(p, rows)}
     <section class="panel stats">
@@ -402,10 +406,13 @@ function marketChart(p, rows) {
   const paid = Number(p.unitPrice) + (Number(p.fees) || 0) / (Number(p.qty) || 1);
   const marks = [{ on: p.date, text: "achat" }, ...(isSold(p) ? [{ on: p.soldDate, text: "vente" }] : [])];
   const up = pts.at(-1).value >= paid;
+  const rrp = setOf(p.setNo)?.rrp;
   return `<section class="panel">
-    <div class="panel-head"><h2>Prix d'une boîte</h2><span class="legend"><i class="lg-line"></i>Marché <i class="lg-ref"></i>Payé</span></div>
-    ${lineChart({ main: pts, ref: [{ on: pts[0].on, value: paid }, { on: pts.at(-1).on, value: paid }], up, label: "Prix d'une boîte sur le marché", names: ["Marché", "Payé"], marks })}
-    <p class="muted tiny chart-hint">Depuis le premier relevé${pts[0].on < p.date ? ", avant et après ton achat" : ""} · prix payé par boîte : ${fmtEur(paid, 2)}${p.fees ? " (frais compris)" : ""}.</p>
+    <div class="panel-head"><h2>Prix d'une boîte</h2><span class="legend"><i class="lg-line"></i>Marché <i class="lg-ref"></i>Payé${rrp ? ` <i class="lg-retail"></i>Prix LEGO` : ""}</span></div>
+    ${lineChart({ main: pts, ref: [{ on: pts[0].on, value: paid }, { on: pts.at(-1).on, value: paid }],
+      retail: rrp ? [{ on: pts[0].on, value: rrp }, { on: pts.at(-1).on, value: rrp }] : null,
+      up, label: "Prix d'une boîte sur le marché", names: ["Marché", "Payé", "Prix LEGO"], marks })}
+    <p class="muted tiny chart-hint">Depuis le premier relevé${pts[0].on < p.date ? ", avant et après ton achat" : ""} · prix payé par boîte : ${fmtEur(paid, 2)}${p.fees ? " (frais compris)" : ""}${rrp ? ` · prix LEGO d'origine : ${fmtEur(rrp, 2)}` : ""}.</p>
   </section>`;
 }
 

@@ -15,12 +15,14 @@ const monthYear = (iso) => { const d = new Date(iso + "T12:00:00"); return `${MO
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 // main = [{on, value}] (ligne pleine + aire) ; ref = [{on, value}] (pointillés, en escalier) ;
-// marks = [{on, text}] (repères verticaux, ex. date d'achat) ; names = libellés de la bulle au doigt.
-export function lineChart({ main, ref = null, up = true, label = "Évolution de la valeur", marks = [], names = ["Valeur", "Investi"] }) {
+// marks = [{on, text}] (repères verticaux, ex. date d'achat) ; names = libellés de la bulle au doigt ;
+// retail = [{on, value}] (prix LEGO d'origine, pointillés fins en escalier, nommé par names[2]).
+export function lineChart({ main, ref = null, retail = null, up = true, label = "Évolution de la valeur", marks = [], names = ["Valeur", "Investi", "Prix LEGO"] }) {
   const pts = main.filter((p) => p.value != null);
   if (new Set(pts.map((p) => p.on)).size < 2) return `<div class="chart-empty">Pas encore assez de relevés pour tracer une courbe.<br>Le prochain relevé hebdomadaire complétera le graphique.</div>`;
   const refPts = (ref || []).filter((p) => p.value != null);
-  const all = [...pts, ...refPts];
+  const retailPts = (retail || []).filter((p) => p.value != null);
+  const all = [...pts, ...refPts, ...retailPts];
   const x0 = Math.min(...all.map((p) => t(p.on))), x1 = Math.max(...all.map((p) => t(p.on)));
   let y0 = Math.min(...all.map((p) => p.value)), y1 = Math.max(...all.map((p) => p.value));
   const step = niceStep(Math.max(y1 - y0, y1 * 0.05));
@@ -57,8 +59,10 @@ export function lineChart({ main, ref = null, up = true, label = "Évolution de 
   const area = `${path(pts)}L${X(end.on).toFixed(1)},${Y(y0)}L${X(pts[0].on).toFixed(1)},${Y(y0)}Z`;
   const cls = up ? "up" : "down";
   // Points pour la lecture au doigt : x, y, date, valeur, valeur de référence à cette date
-  const refAt = (on) => { let v = null; for (const r of refPts) if (r.on <= on) v = r.value; return v; };
-  const data = pts.map((p) => [Math.round(X(p.on) * 10) / 10, Math.round(Y(p.value) * 10) / 10, p.on, Math.round(p.value), refPts.length ? refAt(p.on) : null]);
+  const at = (arr, on) => { let v = null; for (const r of arr) if (r.on <= on) v = r.value; return v; };
+  const data = pts.map((p) => [Math.round(X(p.on) * 10) / 10, Math.round(Y(p.value) * 10) / 10, p.on, Math.round(p.value),
+    refPts.length ? at(refPts, p.on) : null, retailPts.length ? at(retailPts, p.on) : null]);
+  const lines = 1 + (refPts.length ? 1 : 0) + (retailPts.length ? 1 : 0);
 
   return `<svg class="chart ${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}, du ${esc(fmtDate(first))} au ${esc(fmtDate(last))} : de ${esc(fmtEur(pts[0].value))} à ${esc(fmtEur(end.value))}"
       data-pts='${esc(JSON.stringify(data))}' data-names='${esc(JSON.stringify(names))}'>
@@ -67,13 +71,14 @@ export function lineChart({ main, ref = null, up = true, label = "Évolution de 
     ${markers}
     <path class="c-area" d="${area}"/>
     ${refPts.length ? `<path class="c-ref" d="${stepPath(refPts)}"/>` : ""}
+    ${retailPts.length ? `<path class="c-retail" d="${stepPath(retailPts)}"/>` : ""}
     <path class="c-line" d="${path(pts)}"/>
     <circle class="c-dot" cx="${X(end.on)}" cy="${Y(end.value)}" r="4"/>
     <g class="c-hover" visibility="hidden">
       <line class="c-hline" y1="${T}" y2="${H - B}"/>
       <circle class="c-hdot" r="4.5"/>
-      <rect class="c-tip" rx="6" height="${refPts.length ? 30 : 18}" y="0"/>
-      <text class="c-tip-t" y="12"></text><text class="c-tip-t2" y="25"></text>
+      <rect class="c-tip" rx="6" height="${5 + 13 * lines}" y="0"/>
+      <text class="c-tip-t" y="12"></text><text class="c-tip-t2" y="25"></text><text class="c-tip-t3" y="${12 + 13 * (lines - 1)}"></text>
     </g>
   </svg>`;
 }
@@ -84,7 +89,7 @@ function onPointer(e) {
   document.querySelectorAll("svg.chart .c-hover").forEach((g) => { if (!svg || !svg.contains(g)) g.setAttribute("visibility", "hidden"); });
   if (!svg || e.type === "pointerleave") return;
   const pts = JSON.parse(svg.dataset.pts || "[]");
-  const [mainName, refName] = JSON.parse(svg.dataset.names || "[]");
+  const [mainName, refName, retailName] = JSON.parse(svg.dataset.names || "[]");
   if (!pts.length) return;
   const m = svg.getScreenCTM();
   if (!m) return;
@@ -93,16 +98,17 @@ function onPointer(e) {
   for (const p of pts) if (Math.abs(p[0] - x) < Math.abs(best[0] - x)) best = p;
   const g = svg.querySelector(".c-hover");
   g.setAttribute("visibility", "visible");
-  const [px, py, on, value, refV] = best;
+  const [px, py, on, value, refV, retailV] = best;
   const line = g.querySelector(".c-hline"); line.setAttribute("x1", px); line.setAttribute("x2", px);
   const dot = g.querySelector(".c-hdot"); dot.setAttribute("cx", px); dot.setAttribute("cy", py);
-  const t1 = g.querySelector(".c-tip-t"), t2 = g.querySelector(".c-tip-t2");
+  const t1 = g.querySelector(".c-tip-t"), t2 = g.querySelector(".c-tip-t2"), t3 = g.querySelector(".c-tip-t3");
   t1.textContent = `${fmtDate(on)} · ${mainName} ${fmtEur(value)}`;
   t2.textContent = refV != null ? `${refName} ${fmtEur(refV)}` : "";
-  const w = Math.max(t1.getComputedTextLength?.() || 120, t2.getComputedTextLength?.() || 0) + 14;
+  t3.textContent = retailV != null ? `${retailName} ${fmtEur(retailV)}` : "";
+  const w = Math.max(t1.getComputedTextLength?.() || 120, t2.getComputedTextLength?.() || 0, t3.getComputedTextLength?.() || 0) + 14;
   const left = Math.min(Math.max(px - w / 2, 2), W - w - 2);
   const rect = g.querySelector(".c-tip"); rect.setAttribute("x", left); rect.setAttribute("width", w);
-  t1.setAttribute("x", left + 7); t2.setAttribute("x", left + 7);
+  t1.setAttribute("x", left + 7); t2.setAttribute("x", left + 7); t3.setAttribute("x", left + 7);
 }
 if (typeof document !== "undefined" && !globalThis.__brickfolioChart) {
   globalThis.__brickfolioChart = true;

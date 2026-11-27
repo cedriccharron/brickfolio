@@ -165,12 +165,18 @@ function mergeSet(base, bs, at) {
   return out;
 }
 
-// Faut-il (re)demander la fiche Brickset ? Jamais consultée, ou plus de 30 jours et pas encore retiré.
+// Faut-il (re)demander la fiche Brickset ? Jamais consultée ; chaque semaine autour de la date de retrait
+// (Brickset la repousse souvent) ; tous les 30 jours sinon ; plus du tout 6 mois après le retrait.
 function needsBrickset(row, now = new Date()) {
   if (!row?.brickset_at) return true;
-  const today = now.toISOString().slice(0, 10);
-  if (row.exit_date && row.exit_date <= today) return false;
-  return now - new Date(row.brickset_at) > 30 * 86400000;
+  const DAY = 86400000;
+  const age = now - new Date(row.brickset_at);
+  if (row.exit_date) {
+    const since = (now - new Date(`${row.exit_date}T00:00:00Z`)) / DAY; // jours depuis la date de retrait
+    if (since > 180) return false;
+    if (since > -60) return age > 6 * DAY;
+  }
+  return age > 30 * DAY;
 }
 
 
