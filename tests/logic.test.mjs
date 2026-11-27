@@ -370,7 +370,10 @@ await test("opportunités : note à 10 critères et classement", () => {
     launchDate: "2024-01-01", exitDate: "2027-02-20", wantedBy: 50, ownedBy: 900, avgSold: 22, qtySold: 3, qtyStock: 80 };
   assert.ok(candidateScore(city, now).score < s.score);
   const noPrice = candidateScore({ ...ucs, avgSold: null, avgStock: null, qtySold: null, qtyStock: null }, now);
-  assert.equal(noPrice.provisional, true); // prime et tension inconnues : note ramenée sur les 70 points connus
+  assert.equal(noPrice.provisional, true); // prime et tension inconnues : comptées pour moitié
+  assert.ok(noPrice.score < s.score);
+  const bare = candidateScore({ setNo: "4000351-1", theme: "Editions", availability: "LEGO exclusive", pieces: 2845, exitDate: "2026-12-31", wantedBy: 10, ownedBy: 100 }, now);
+  assert.ok(bare.score < 60, `fiche presque vide : ${bare.score}`); // ne doit plus passer devant les sets connus
   assert.equal(noPrice.parts.find((p) => p.key === "premium").points, null);
   const list = rankCandidates([city, ucs, { ...city, setNo: "40000-1", availability: "LEGO Gift with Purchase" }, { ...city, setNo: "1-1", exitDate: "2027-06-30" }, { ...city, setNo: "2-1", exitDate: "2026-10-01" }],
     { now, owned: new Set(["75192-1"]), watched: new Set(["60300-1"]) });

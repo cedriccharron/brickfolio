@@ -331,8 +331,8 @@ export function refreshSummary(r) {
 
 // ---------- Opportunités (v0.10) : sets du catalogue dont le retrait approche ----------
 // Note sur 100 à partir de 10 critères mesurés aujourd'hui (pas de prédiction). Chaque critère vaut 0 à 1,
-// multiplié par son poids ; les critères inconnus (ex. pas encore de prix BrickLink) sont écartés et la note
-// est ramenée sur 100 avec les critères connus (« provisoire » s'il en manque).
+// multiplié par son poids ; un critère inconnu (ex. pas encore de prix BrickLink) compte pour moitié
+// (« provisoire » s'il en manque).
 // Réputation des gammes : ce que constatent les collectionneurs, pas une garantie (modifiable ici).
 export const THEME_REPUTATION = {
   "Star Wars": 0.9, "Harry Potter": 0.8, "Icons": 0.85, "Creator Expert": 0.85, "Ideas": 0.85, "The Lord of the Rings": 0.85,
@@ -399,10 +399,9 @@ export function candidateScore(c, now = today()) {
   if (daysLeft != null) { v.timing = daysLeft <= 30 ? 1 : Math.max(0.4, 1 - ((daysLeft - 30) / 60) * 0.6); d.timing = `retrait dans ${Math.max(0, daysLeft)} j`; }
 
   const parts = CRITERIA.map((k) => ({ ...k, value: v[k.key] ?? null, points: v[k.key] == null ? null : Math.round(v[k.key] * k.max * 10) / 10, detail: d[k.key] || "inconnu" }));
-  const known = parts.filter((p) => p.points != null);
-  const maxKnown = known.reduce((a, p) => a + p.max, 0);
-  const score = maxKnown ? Math.round((known.reduce((a, p) => a + p.points, 0) / maxKnown) * 100) : null;
-  return { score, provisional: maxKnown < 100, parts, market, premium, daysLeft };
+  // Critère inconnu (souvent le prix BrickLink pas encore relevé) : compté pour moitié, ni bonus ni pénalité.
+  const score = Math.round(parts.reduce((a, p) => a + (p.points ?? p.max / 2), 0));
+  return { score, provisional: parts.some((p) => p.points == null), parts, market, premium, daysLeft };
 }
 
 // Liste classée : catalogue + sets détenus (repérés « à toi ») + surveillés, dans la fenêtre de « days » jours.

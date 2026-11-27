@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary, rankCandidates, CRITERIA,
 } from "./invest.js";
 
-const VERSION = "0.10.0";
+const VERSION = "0.10.1";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -340,7 +340,7 @@ function viewOpps() {
         <li><b>Prime (15)</b> et <b>tension (15)</b> : se revend-il déjà au-dessus du prix LEGO sur BrickLink ? Beaucoup de ventes pour peu d'annonces ?</li>
         <li><b>Délai (5)</b> : un retrait proche est plus sûr (Brickset repousse souvent les dates).</li>
       </ul>
-      <p>Note « provisoire » : il manque des données (souvent le prix BrickLink, relevé au fil des jours) ; elle est calculée sur les critères connus. Le catalogue est parcouru chaque semaine, les prix BrickLink chaque jour par lots. Les promos en boutique ne sont pas prises en compte.</p>
+      <p>Note « provisoire » : il manque des données (souvent le prix BrickLink, relevé au fil des jours) ; chaque critère inconnu compte pour moitié de ses points. Le catalogue est parcouru chaque semaine, les prix BrickLink chaque jour par lots. Les promos en boutique ne sont pas prises en compte.</p>
     </details>`;
 }
 
