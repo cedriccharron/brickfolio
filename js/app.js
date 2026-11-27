@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.6.3";
+const VERSION = "0.6.4";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -704,7 +704,7 @@ async function refreshPrices(silent = false) {
   if (S.busy) return;
   S.busy = true;
   render(); // roue qui tourne pendant le relevé
-  if (!silent) toast("Relevé BrickLink et Brickset en cours…");
+  if (!silent) toast("Relevé BrickLink et Brickset en cours…", "info", { sticky: true }); // reste affiché jusqu'au résultat
   try {
     const r = await S.store.refreshPrices();
     await reload();
