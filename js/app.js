@@ -10,7 +10,7 @@ import {
   setStatus, vsRetail, refreshSummary,
 } from "./invest.js";
 
-const VERSION = "0.6.2";
+const VERSION = "0.6.3";
 // Factures acceptées : PDF ou photo, 10 Mo au plus.
 const INVOICE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const INVOICE_MAX = 10 * 1024 * 1024;
@@ -164,7 +164,7 @@ function viewPortfolio() {
   const sel = (key, label, options) => `<label class="field"><span>${label}</span><select data-f="${key}">${options}</select></label>`;
 
   return `${top("Portefeuille", { sub: lastRun?.finished_at ? `Prix du ${fmtDate(lastRun.finished_at)}${S.data.offline ? " · hors ligne" : ""}` : "Aucun relevé de prix pour l'instant",
-      actions: `<button class="icon-btn" data-action="refresh" aria-label="Mettre à jour les prix" ${S.busy ? "disabled" : ""}>${icon("refresh")}</button>` })}
+      actions: `<button class="icon-btn" data-action="refresh" aria-label="${S.busy ? "Relevé en cours" : "Mettre à jour les prix"}" ${S.busy ? "disabled aria-busy=\"true\"" : ""}><span class="${S.busy ? "spin" : ""}">${icon("refresh")}</span></button>` })}
     <section class="hero">
       <span class="kicker">Valeur actuelle du stock</span>
       <strong class="big-num">${fmtEur(g.held.value)}</strong>
@@ -682,7 +682,7 @@ function viewMore() {
       <p class="muted small">Chaque lundi matin, la valeur de tes sets est relevée sur BrickLink : moyenne des ventes des 6 derniers mois en Europe, TVA comprise, dans l'état de ton achat (neuf ou occasion). S'il n'y a eu aucune vente, la moyenne des annonces en cours est utilisée.</p>
       <p class="muted small">Le prix LEGO d'origine, les dates de sortie et de retrait, le thème et le nombre de pièces viennent de Brickset (fiche vérifiée tous les 30 jours tant que le set n'est pas retiré).</p>
       <p class="small">${run ? `Dernier relevé : <strong>${fmtDate(run.finished_at || run.started_at)}</strong>${run.message ? `<br><span class="muted">${esc(run.message)}</span>` : ""}` : "Aucun relevé pour l'instant."}</p>
-      <button class="btn primary block" data-action="refresh" ${S.busy ? "disabled" : ""}>${S.busy ? "Relevé en cours…" : "Mettre à jour maintenant"}</button>
+      <button class="btn primary block" data-action="refresh" ${S.busy ? "disabled" : ""}>${S.busy ? `<span class="spin">${icon("refresh", 18)}</span> Relevé BrickLink et Brickset en cours…` : "Mettre à jour maintenant"}</button>
     </section>
     <section class="panel">
       <h2>${icon("download", 20)} Exporter</h2>
@@ -703,7 +703,8 @@ function viewMore() {
 async function refreshPrices(silent = false) {
   if (S.busy) return;
   S.busy = true;
-  if (!silent) { render(); toast("Relevé des prix en cours…"); }
+  render(); // roue qui tourne pendant le relevé
+  if (!silent) toast("Relevé BrickLink et Brickset en cours…");
   try {
     const r = await S.store.refreshPrices();
     await reload();
